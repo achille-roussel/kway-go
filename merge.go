@@ -22,37 +22,15 @@ func Merge2[K cmp.Ordered, V any](seqs ...iter.Seq2[K, V]) iter.Seq2[K, V] {
 // function to determine the order of values. The sequences must be ordered
 // by the same comparison function.
 func MergeFunc[V any](cmp func(V, V) int, seqs ...iter.Seq[V]) iter.Seq[V] {
-	heap := make([]iterator[V], 0, len(seqs))
-
-	for _, seq := range seqs {
-		next, stop := iter.Pull(seq)
-		v, ok := next()
-		if ok {
-			heap = append(heap, iterator[V]{
-				item: v,
-				next: next,
-				stop: stop,
-			})
-		}
-	}
-
-	heapify(heap, cmp)
-
-	return func(yield func(V) bool) {
-		for len(heap) > 0 {
-			m := &heap[0]
-			if !yield(m.item) {
-				return
-			}
-			v, ok := m.next()
-			if ok {
-				m.item = v
-				fix(heap, 0, cmp)
-			} else {
-				m.stop()
-				heap = pop(heap, cmp)
-			}
-		}
+	switch len(seqs) {
+	case 0:
+		return merge0(cmp)
+	case 1:
+		return merge1(cmp, seqs[0])
+	case 2:
+		return merge2(cmp, seqs[0], seqs[1])
+	default:
+		return mergeN(cmp, seqs)
 	}
 }
 
@@ -83,6 +61,102 @@ type pair[K, V any] struct {
 
 func comparePairs[K, V any](cmp func(K, K) int) func(p1, p2 pair[K, V]) int {
 	return func(p1, p2 pair[K, V]) int { return cmp(p1.k, p2.k) }
+}
+
+func merge0[V any](cmp func(V, V) int) iter.Seq[V] {
+	return func(yield func(V) bool) {}
+}
+
+func merge1[V any](cmp func(V, V) int, seq0 iter.Seq[V]) iter.Seq[V] {
+	return seq0
+}
+
+func merge2[V any](cmp func(V, V) int, seq0, seq1 iter.Seq[V]) iter.Seq[V] {
+	return func(yield func(V) bool) {
+		next0, stop0 := iter.Pull(seq0)
+		defer stop0()
+
+		next1, stop1 := iter.Pull(seq1)
+		defer stop1()
+
+		v0, ok0 := next0()
+		v1, ok1 := next1()
+
+		for ok0 && ok1 {
+			var value V
+			if cmp(v0, v1) < 0 {
+				value = v0
+				v0, ok0 = next0()
+			} else {
+				value = v1
+				v1, ok1 = next1()
+			}
+			if !yield(value) {
+				return
+			}
+		}
+
+		if ok0 {
+			if !yield(v0) {
+				return
+			}
+			seq0(yield)
+		}
+
+		if ok1 {
+			if !yield(v1) {
+				return
+			}
+			seq1(yield)
+		}
+	}
+}
+
+func mergeN[V any](cmp func(V, V) int, seqs []iter.Seq[V]) iter.Seq[V] {
+	heap := make([]iterator[V], len(seqs))
+
+	for i, seq := range seqs {
+		next, stop := iter.Pull(seq)
+		heap[i] = iterator[V]{next: next, stop: stop}
+	}
+
+	return func(yield func(V) bool) {
+		defer func() {
+			for i := range heap {
+				heap[i].stop()
+			}
+		}()
+		i := 0
+
+		for j := range heap {
+			if v, ok := heap[j].next(); ok {
+				heap[i] = heap[j]
+				heap[i].item = v
+				i++
+			} else {
+				heap[j].stop()
+				heap[j].next = nil
+			}
+		}
+
+		heap = heap[:i]
+		heapify(heap, cmp)
+
+		for len(heap) > 0 {
+			m := &heap[0]
+			if !yield(m.item) {
+				return
+			}
+			v, ok := m.next()
+			if ok {
+				m.item = v
+				fix(heap, 0, cmp)
+			} else {
+				m.stop()
+				heap = pop(heap, cmp)
+			}
+		}
+	}
 }
 
 // Copyright 2009 The Go Authors. All rights reserved.
