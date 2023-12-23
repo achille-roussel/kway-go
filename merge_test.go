@@ -48,17 +48,26 @@ func squares2(n int) iter.Seq2[int, int] {
 	}
 }
 
-func repeat(n int, words []string) iter.Seq[string] {
-	return func(yield func(string) bool) {
-		for i := range n {
-			if !yield(words[i%len(words)]) {
+func sequence(min, max, step int) iter.Seq[int] {
+	return func(yield func(int) bool) {
+		for i := min; i < max; i += step {
+			if !yield(i) {
 				return
 			}
 		}
 	}
 }
 
-var testwords = []string{"foo", "bar", "baz", "qux", "quux", "corge", "grault", "garply", "waldo", "fred"}
+func sequence2(min, max, step int) iter.Seq2[int, int] {
+	return func(yield func(int, int) bool) {
+		for i, j := 0, min; j < max; j += step {
+			if !yield(i, j) {
+				return
+			}
+			i++
+		}
+	}
+}
 
 func TestMerge(t *testing.T) {
 	m := Merge(count(1), count(2), count(3))
@@ -89,18 +98,18 @@ func BenchmarkMergeTwo(b *testing.B) {
 }
 
 func BenchmarkMergeTen(b *testing.B) {
-	benchmark(b, func(cmp func(string, string) int) iter.Seq[string] {
+	benchmark(b, func(cmp func(int, int) int) iter.Seq[int] {
 		return MergeFunc(cmp,
-			repeat(1000, testwords[0:]),
-			repeat(1000, testwords[1:]),
-			repeat(1000, testwords[2:]),
-			repeat(1000, testwords[3:]),
-			repeat(1000, testwords[4:]),
-			repeat(1000, testwords[5:]),
-			repeat(1000, testwords[6:]),
-			repeat(1000, testwords[7:]),
-			repeat(1000, testwords[8:]),
-			repeat(1000, testwords[9:]),
+			sequence(0, 1000, 1),
+			sequence(1, 2000, 2),
+			sequence(2, 3000, 3),
+			sequence(3, 4000, 4),
+			sequence(4, 5000, 5),
+			sequence(5, 6000, 6),
+			sequence(6, 7000, 7),
+			sequence(7, 8000, 8),
+			sequence(8, 9000, 9),
+			sequence(9, 10000, 10),
 		)
 	})
 }
@@ -140,16 +149,16 @@ func BenchmarkMerge2Two(b *testing.B) {
 func BenchmarkMerge2Ten(b *testing.B) {
 	benchmark2(b, func(cmp func(int, int) int) iter.Seq2[int, int] {
 		return Merge2Func(cmp,
-			count2(1000),
-			count2(1000),
-			count2(1000),
-			count2(1000),
-			count2(1000),
-			squares2(100),
-			squares2(100),
-			squares2(100),
-			squares2(100),
-			squares2(100),
+			sequence2(0, 1000, 1),
+			sequence2(1, 2000, 2),
+			sequence2(2, 3000, 3),
+			sequence2(3, 4000, 4),
+			sequence2(4, 5000, 5),
+			sequence2(5, 6000, 6),
+			sequence2(6, 7000, 7),
+			sequence2(7, 8000, 8),
+			sequence2(8, 9000, 9),
+			sequence2(9, 10000, 10),
 		)
 	})
 }
@@ -163,13 +172,12 @@ func benchmark2[K cmp.Ordered, V any](b *testing.B, merge func(func(K, K) int) i
 	start := time.Now()
 	count := 0
 	for i := 0; i < b.N; i++ {
-		count = 0
 		for _, _ = range merge(compare) {
 			count++
 		}
 	}
 	duration := time.Since(start)
-	b.ReportMetric(float64(duration)/float64(count*b.N), "ns/op")
-	b.ReportMetric(float64(count*b.N)/duration.Seconds(), "merge/s")
-	b.ReportMetric(float64(comparisons)/float64(count*b.N), "comp/op")
+	b.ReportMetric(float64(duration)/float64(count), "ns/op")
+	b.ReportMetric(float64(count)/duration.Seconds(), "merge/s")
+	b.ReportMetric(float64(comparisons)/float64(count), "comp/op")
 }
