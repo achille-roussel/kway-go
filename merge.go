@@ -113,33 +113,29 @@ func merge2[V any](cmp func(V, V) int, seq0, seq1 iter.Seq[V]) iter.Seq[V] {
 }
 
 func mergeN[V any](cmp func(V, V) int, seqs []iter.Seq[V]) iter.Seq[V] {
-	heap := make([]iterator[V], len(seqs))
-
-	for i, seq := range seqs {
-		next, stop := iter.Pull(seq)
-		heap[i] = iterator[V]{next: next, stop: stop}
-	}
-
 	return func(yield func(V) bool) {
+		heap := make([]iterator[V], 0, 16)
+
 		defer func() {
 			for i := range heap {
 				heap[i].stop()
 			}
 		}()
-		i := 0
 
-		for j := range heap {
-			if v, ok := heap[j].next(); ok {
-				heap[i] = heap[j]
-				heap[i].item = v
-				i++
+		for _, seq := range seqs {
+			next, stop := iter.Pull(seq)
+			v, ok := next()
+			if ok {
+				heap = append(heap, iterator[V]{
+					item: v,
+					next: next,
+					stop: stop,
+				})
 			} else {
-				heap[j].stop()
-				heap[j].next = nil
+				stop()
 			}
 		}
 
-		heap = heap[:i]
 		heapify(heap, cmp)
 
 		for len(heap) > 0 {
