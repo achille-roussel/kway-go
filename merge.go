@@ -3,6 +3,7 @@ package kway
 
 import (
 	"cmp"
+	"fmt"
 	"iter"
 )
 
@@ -56,6 +57,13 @@ type iterator[T any] struct {
 	item T
 	next func() (T, bool)
 	stop func()
+}
+
+func (it *iterator[T]) String() string {
+	if it == nil {
+		return "<nil>"
+	}
+	return fmt.Sprint(it.item)
 }
 
 type pair[K, V any] struct {
@@ -123,44 +131,11 @@ func yieldAll[V any](yield func(V) bool, next func() (V, bool)) {
 }
 
 func mergeN[V any](cmp func(V, V) int, seqs []iter.Seq[V]) iter.Seq[V] {
+	tree := makeTree(seqs...)
 	return func(yield func(V) bool) {
-		heap := make([]iterator[V], 0, 16)
-
-		defer func() {
-			for i := range heap {
-				heap[i].stop()
-			}
-		}()
-
-		for _, seq := range seqs {
-			buffer := make([]V, bufferSize)
-			next, stop := bufferedPull(buffer, seq)
-			v, ok := next()
-			if ok {
-				heap = append(heap, iterator[V]{
-					item: v,
-					next: next,
-					stop: stop,
-				})
-			} else {
-				stop()
-			}
-		}
-
-		heapify(heap, cmp)
-
-		for len(heap) > 0 {
-			m := &heap[0]
-			if !yield(m.item) {
-				return
-			}
-			v, ok := m.next()
-			if ok {
-				m.item = v
-				fix(heap, 0, cmp)
-			} else {
-				m.stop()
-				heap = pop(heap, cmp)
+		for tree.next(cmp) {
+			if !yield(tree.top()) {
+				break
 			}
 		}
 	}
