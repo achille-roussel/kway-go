@@ -92,17 +92,6 @@ func (t *tree[V]) initialize(i int, cmp func(V, V) int) node {
 	return winner
 }
 
-func (t *tree[V]) replayGames(winner node, cmp func(V, V) int) node {
-	i := parent(winner.index)
-	for {
-		t.nodes[i], winner = t.playGame(t.nodes[i], winner, cmp)
-		if i == 0 {
-			return winner
-		}
-		i = parent(i)
-	}
-}
-
 func (t *tree[V]) playGame(n1, n2 node, cmp func(V, V) int) (loser, winner node) {
 	if n1.value < 0 {
 		return n1, n2
@@ -143,8 +132,25 @@ func (t *tree[V]) next(cmp func(V, V) int) bool {
 		}
 	}
 
-	t.winner = t.replayGames(t.winner, cmp)
-	return true
+	winner := t.winner
+	i := parent(winner.index)
+	for {
+		player := t.nodes[i]
+
+		switch {
+		case player.value < 0:
+		case winner.value < 0:
+			t.nodes[i], winner = winner, player
+		case cmp(t.items[player.value].item, t.items[winner.value].item) < 0:
+			t.nodes[i], winner = winner, player
+		}
+
+		if i == 0 {
+			t.winner = winner
+			return true
+		}
+		i = parent(i)
+	}
 }
 
 func (t *tree[V]) len() int {
