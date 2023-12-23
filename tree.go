@@ -78,6 +78,12 @@ func (t tree[V]) print(p treeprint.Tree, i int) {
 	t.print(p, right(i))
 }
 
+func (t *tree[V]) stop() {
+	for _, it := range t.items {
+		it.stop()
+	}
+}
+
 func (t *tree[V]) initialize(i int, cmp func(V, V) int) node {
 	if i >= len(t.nodes) {
 		return node{index: -1, value: -1}

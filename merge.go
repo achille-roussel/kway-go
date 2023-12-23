@@ -133,6 +133,7 @@ func yieldAll[V any](yield func(V) bool, next func() (V, bool)) {
 func mergeN[V any](cmp func(V, V) int, seqs []iter.Seq[V]) iter.Seq[V] {
 	tree := makeTree(seqs...)
 	return func(yield func(V) bool) {
+		defer tree.stop()
 		for tree.next(cmp) {
 			if !yield(tree.top()) {
 				break
