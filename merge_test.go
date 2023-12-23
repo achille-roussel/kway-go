@@ -77,20 +77,20 @@ func TestMerge(t *testing.T) {
 }
 
 func BenchmarkMergeOne(b *testing.B) {
-	benchmark(b, func() iter.Seq[int] {
-		return Merge(count(1000))
+	benchmark(b, func(cmp func(int, int) int) iter.Seq[int] {
+		return MergeFunc(cmp, count(1000))
 	})
 }
 
 func BenchmarkMergeTwo(b *testing.B) {
-	benchmark(b, func() iter.Seq[int] {
-		return Merge(count(1000), squares(100))
+	benchmark(b, func(cmp func(int, int) int) iter.Seq[int] {
+		return MergeFunc(cmp, count(1000), squares(100))
 	})
 }
 
 func BenchmarkMergeTen(b *testing.B) {
-	benchmark(b, func() iter.Seq[string] {
-		return Merge(
+	benchmark(b, func(cmp func(string, string) int) iter.Seq[string] {
+		return MergeFunc(cmp,
 			repeat(1000, testwords[0:]),
 			repeat(1000, testwords[1:]),
 			repeat(1000, testwords[2:]),
@@ -105,35 +105,41 @@ func BenchmarkMergeTen(b *testing.B) {
 	})
 }
 
-func benchmark[V cmp.Ordered](b *testing.B, merge func() iter.Seq[V]) {
+func benchmark[V cmp.Ordered](b *testing.B, merge func(func(V, V) int) iter.Seq[V]) {
+	comparisons := 0
+	compare := func(a, b V) int {
+		comparisons++
+		return cmp.Compare(a, b)
+	}
 	start := time.Now()
 	count := 0
 	for i := 0; i < b.N; i++ {
 		count = 0
-		for _ = range merge() {
+		for _ = range merge(compare) {
 			count++
 		}
 	}
 	duration := time.Since(start)
 	b.ReportMetric(float64(duration)/float64(count*b.N), "ns/op")
 	b.ReportMetric(float64(count*b.N)/duration.Seconds(), "merge/s")
+	b.ReportMetric(float64(comparisons)/float64(count*b.N), "comp/op")
 }
 
 func BenchmarkMerge2One(b *testing.B) {
-	benchmark2(b, func() iter.Seq2[int, int] {
-		return Merge2(count2(1000))
+	benchmark2(b, func(cmp func(int, int) int) iter.Seq2[int, int] {
+		return Merge2Func(cmp, count2(1000))
 	})
 }
 
 func BenchmarkMerge2Two(b *testing.B) {
-	benchmark2(b, func() iter.Seq2[int, int] {
-		return Merge2(count2(1000), squares2(100))
+	benchmark2(b, func(cmp func(int, int) int) iter.Seq2[int, int] {
+		return Merge2Func(cmp, count2(1000), squares2(100))
 	})
 }
 
 func BenchmarkMerge2Ten(b *testing.B) {
-	benchmark2(b, func() iter.Seq2[int, int] {
-		return Merge2(
+	benchmark2(b, func(cmp func(int, int) int) iter.Seq2[int, int] {
+		return Merge2Func(cmp,
 			count2(1000),
 			count2(1000),
 			count2(1000),
@@ -148,16 +154,22 @@ func BenchmarkMerge2Ten(b *testing.B) {
 	})
 }
 
-func benchmark2[K cmp.Ordered, V any](b *testing.B, merge func() iter.Seq2[K, V]) {
+func benchmark2[K cmp.Ordered, V any](b *testing.B, merge func(func(K, K) int) iter.Seq2[K, V]) {
+	comparisons := 0
+	compare := func(a, b K) int {
+		comparisons++
+		return cmp.Compare(a, b)
+	}
 	start := time.Now()
 	count := 0
 	for i := 0; i < b.N; i++ {
 		count = 0
-		for _, _ = range merge() {
+		for _, _ = range merge(compare) {
 			count++
 		}
 	}
 	duration := time.Since(start)
 	b.ReportMetric(float64(duration)/float64(count*b.N), "ns/op")
 	b.ReportMetric(float64(count*b.N)/duration.Seconds(), "merge/s")
+	b.ReportMetric(float64(comparisons)/float64(count*b.N), "comp/op")
 }
