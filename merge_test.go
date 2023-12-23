@@ -48,6 +48,18 @@ func squares2(n int) iter.Seq2[int, int] {
 	}
 }
 
+func repeat(n int, words []string) iter.Seq[string] {
+	return func(yield func(string) bool) {
+		for i := range n {
+			if !yield(words[i%len(words)]) {
+				return
+			}
+		}
+	}
+}
+
+var testwords = []string{"foo", "bar", "baz", "qux", "quux", "corge", "grault", "garply", "waldo", "fred"}
+
 func TestMerge(t *testing.T) {
 	m := Merge(count(1), count(2), count(3))
 
@@ -77,18 +89,18 @@ func BenchmarkMergeTwo(b *testing.B) {
 }
 
 func BenchmarkMergeTen(b *testing.B) {
-	benchmark(b, func() iter.Seq[int] {
+	benchmark(b, func() iter.Seq[string] {
 		return Merge(
-			count(1000),
-			count(1000),
-			count(1000),
-			count(1000),
-			count(1000),
-			squares(100),
-			squares(100),
-			squares(100),
-			squares(100),
-			squares(100),
+			repeat(1000, testwords[0:]),
+			repeat(1000, testwords[1:]),
+			repeat(1000, testwords[2:]),
+			repeat(1000, testwords[3:]),
+			repeat(1000, testwords[4:]),
+			repeat(1000, testwords[5:]),
+			repeat(1000, testwords[6:]),
+			repeat(1000, testwords[7:]),
+			repeat(1000, testwords[8:]),
+			repeat(1000, testwords[9:]),
 		)
 	})
 }
