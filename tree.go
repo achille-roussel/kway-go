@@ -43,12 +43,15 @@ func makeTree[V any](seqs ...iter.Seq[V]) tree[V] {
 
 	t.count = len(t.items)
 	t.nodes = make([]node, 2*len(t.items))
-	for i := range t.items {
-		t.nodes[i] = node{index: -1, value: -1}
+
+	head := t.nodes[:len(t.nodes)/2]
+	tail := t.nodes[len(t.nodes)/2:]
+
+	for i := range head {
+		head[i] = node{index: -1, value: -1}
 	}
-	for i := range t.items {
-		j := i + len(t.items)
-		t.nodes[j] = node{index: j, value: i}
+	for i := range tail {
+		tail[i] = node{index: i + len(tail), value: i}
 	}
 	return t
 }
@@ -105,9 +108,7 @@ func (t *tree[V]) playGame(n1, n2 node, cmp func(V, V) int) (loser, winner node)
 	if n2.value < 0 {
 		return n2, n1
 	}
-	i1 := t.items[n1.value]
-	i2 := t.items[n2.value]
-	if cmp(i1.item, i2.item) < 0 {
+	if cmp(t.items[n1.value].item, t.items[n2.value].item) < 0 {
 		return n2, n1
 	} else {
 		return n1, n2
