@@ -42,6 +42,8 @@ algorithm. When merging more than two sequences, the implementation uses
 a min-heap to merge all the incoming sequences. The heap algorithm is a
 simplified version of the standard library's `container/heap` package.
 
+### High-performance merges
+
 ### Note on Heap vs Loser Tree
 
 There is an experiment of replacing the min-heap with a loser tree on the

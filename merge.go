@@ -6,6 +6,10 @@ import (
 	"iter"
 )
 
+const (
+	bufferSize = 128
+)
+
 // Merge merges multiple sequences into one. The sequences must produce ordered
 // values.
 func Merge[V cmp.Ordered](seqs ...iter.Seq[V]) iter.Seq[V] {
@@ -73,10 +77,13 @@ func merge1[V any](cmp func(V, V) int, seq0 iter.Seq[V]) iter.Seq[V] {
 
 func merge2[V any](cmp func(V, V) int, seq0, seq1 iter.Seq[V]) iter.Seq[V] {
 	return func(yield func(V) bool) {
-		next0, stop0 := iter.Pull(seq0)
+		buf0 := make([]V, bufferSize)
+		buf1 := make([]V, bufferSize)
+
+		next0, stop0 := bufferedPull(buf0, seq0)
 		defer stop0()
 
-		next1, stop1 := iter.Pull(seq1)
+		next1, stop1 := bufferedPull(buf1, seq1)
 		defer stop1()
 
 		v0, ok0 := next0()
@@ -126,7 +133,8 @@ func mergeN[V any](cmp func(V, V) int, seqs []iter.Seq[V]) iter.Seq[V] {
 		}()
 
 		for _, seq := range seqs {
-			next, stop := iter.Pull(seq)
+			buffer := make([]V, bufferSize)
+			next, stop := bufferedPull(buffer, seq)
 			v, ok := next()
 			if ok {
 				heap = append(heap, iterator[V]{

@@ -9,6 +9,7 @@ import (
 	"time"
 )
 
+//go:noinline
 func count(n int) iter.Seq[int] {
 	return func(yield func(int) bool) {
 		for i := range n {
@@ -19,6 +20,7 @@ func count(n int) iter.Seq[int] {
 	}
 }
 
+//go:noinline
 func squares(n int) iter.Seq[int] {
 	return func(yield func(int) bool) {
 		for i := range n {
@@ -29,6 +31,7 @@ func squares(n int) iter.Seq[int] {
 	}
 }
 
+//go:noinline
 func count2(n int) iter.Seq2[int, int] {
 	return func(yield func(int, int) bool) {
 		for i := range n {
@@ -39,6 +42,7 @@ func count2(n int) iter.Seq2[int, int] {
 	}
 }
 
+//go:noinline
 func squares2(n int) iter.Seq2[int, int] {
 	return func(yield func(int, int) bool) {
 		for i := range n {
@@ -49,6 +53,7 @@ func squares2(n int) iter.Seq2[int, int] {
 	}
 }
 
+//go:noinline
 func sequence(min, max, step int) iter.Seq[int] {
 	return func(yield func(int) bool) {
 		for i := min; i < max; i += step {
@@ -59,6 +64,7 @@ func sequence(min, max, step int) iter.Seq[int] {
 	}
 }
 
+//go:noinline
 func sequence2(min, max, step int) iter.Seq2[int, int] {
 	return func(yield func(int, int) bool) {
 		for i, j := 0, min; j < max; j += step {
