@@ -2,6 +2,7 @@ package kway
 
 import (
 	"cmp"
+	"fmt"
 	"iter"
 	"slices"
 	"testing"
@@ -69,19 +70,38 @@ func sequence2(min, max, step int) iter.Seq2[int, int] {
 	}
 }
 
-func TestMerge(t *testing.T) {
-	m := Merge(count(1), count(2), count(3))
-
-	var values []int
-	for v := range m {
+func values[T any](seq iter.Seq[T]) (values []T) {
+	for v := range seq {
 		values = append(values, v)
 	}
+	return values
+}
 
-	if len(values) != 6 {
-		t.Errorf("expected 6 values, got %d", len(values))
-	}
-	if !slices.Equal(values, []int{0, 0, 0, 1, 1, 2}) {
-		t.Errorf("expected [0, 0, 0, 1, 1, 2], got %v", values)
+func TestMerge(t *testing.T) {
+	test(t, Merge[int])
+}
+
+func test(t *testing.T, merge func(...iter.Seq[int]) iter.Seq[int]) {
+	for n := range 10 {
+		t.Run(fmt.Sprint(n), func(t *testing.T) {
+			seqs := make([]iter.Seq[int], n)
+			want := make([]int, 0, 2*n)
+
+			for i := range seqs {
+				seqs[i] = count(i)
+				vs := values(count(i))
+				want = append(want, vs...)
+			}
+
+			slices.Sort(want)
+
+			seq := merge(seqs...)
+			got := values(seq)
+
+			if !slices.Equal(got, want) {
+				t.Errorf("expected %v, got %v", want, got)
+			}
+		})
 	}
 }
 
