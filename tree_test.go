@@ -82,8 +82,13 @@ func TestTree(t *testing.T) {
 
 			var tree = makeTree(seqs...)
 			var values []string
-			for tree.next(strings.Compare) {
-				values = append(values, tree.top())
+			for {
+				v, ok := tree.next(strings.Compare)
+				if ok {
+					values = append(values, v)
+				} else {
+					break
+				}
 			}
 
 			var want []string

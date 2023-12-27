@@ -1,11 +1,6 @@
 package kway
 
-import (
-	"fmt"
-	"iter"
-
-	"github.com/xlab/treeprint"
-)
+import "iter"
 
 type tree[V any] struct {
 	items  []iterator[V]
@@ -19,10 +14,6 @@ type node struct {
 	value int
 }
 
-func (n node) String() string {
-	return fmt.Sprintf("{%d:%d}", n.index, n.value)
-}
-
 func makeTree[V any](seqs ...iter.Seq[V]) tree[V] {
 	t := tree[V]{
 		items:  make([]iterator[V], 0, len(seqs)),
@@ -30,7 +21,8 @@ func makeTree[V any](seqs ...iter.Seq[V]) tree[V] {
 	}
 
 	for _, seq := range seqs {
-		next, stop := iter.Pull(seq)
+		buffer := make([]V, bufferSize)
+		next, stop := bufferedPull(buffer, seq)
 		v, ok := next()
 		if ok {
 			t.items = append(t.items, iterator[V]{
@@ -54,37 +46,6 @@ func makeTree[V any](seqs ...iter.Seq[V]) tree[V] {
 		tail[i] = node{index: i + len(tail), value: i}
 	}
 	return t
-}
-
-func (t tree[V]) String() string {
-	p := treeprint.New()
-	t.print(p, 0)
-	return p.String()
-}
-
-func (t tree[V]) print(p treeprint.Tree, i int) {
-	if i >= len(t.nodes) {
-		return
-	}
-	var s string
-	if n := t.nodes[i]; n.value < 0 {
-		s = fmt.Sprintf("%d: nil", i)
-	} else {
-		s = fmt.Sprintf("%d: %v", i, t.items[n.value].item)
-	}
-	if i == 0 {
-		p.SetValue(s)
-	} else {
-		p = p.AddBranch(s)
-	}
-	t.print(p, left(i))
-	t.print(p, right(i))
-}
-
-func (t *tree[V]) stop() {
-	for _, it := range t.items {
-		it.stop()
-	}
 }
 
 func (t *tree[V]) initialize(i int, cmp func(V, V) int) node {
@@ -115,14 +76,14 @@ func (t *tree[V]) playGame(n1, n2 node, cmp func(V, V) int) (loser, winner node)
 	}
 }
 
-func (t *tree[V]) next(cmp func(V, V) int) bool {
+func (t *tree[V]) next(cmp func(V, V) int) (value V, ok bool) {
 	if t.count == 0 {
-		return false
+		return value, false
 	}
 
 	if t.winner.index < 0 {
 		t.winner = t.initialize(0, cmp)
-		return true
+		return t.items[t.winner.value].item, true
 	}
 
 	it := &t.items[t.winner.value]
@@ -135,41 +96,35 @@ func (t *tree[V]) next(cmp func(V, V) int) bool {
 		t.count--
 		t.winner.value = -1
 		if t.count == 0 {
-			return false
+			return value, false
 		}
 	}
 
 	winner := t.winner
-	i := parent(winner.index)
+	offset := parent(winner.index)
 	for {
-		player := t.nodes[i]
+		player := t.nodes[offset]
 
 		switch {
 		case player.value < 0:
 		case winner.value < 0:
-			t.nodes[i], winner = winner, player
+			t.nodes[offset], winner = winner, player
 		case cmp(t.items[player.value].item, t.items[winner.value].item) < 0:
-			t.nodes[i], winner = winner, player
+			t.nodes[offset], winner = winner, player
 		}
 
-		if i == 0 {
+		if offset == 0 {
 			t.winner = winner
-			return true
+			return t.items[t.winner.value].item, true
 		}
-		i = parent(i)
+		offset = parent(offset)
 	}
 }
 
-func (t *tree[V]) len() int {
-	return t.count
-}
-
-func (t *tree[V]) top() V {
-	var zero V
-	if t.winner.value < 0 {
-		return zero
+func (t *tree[V]) stop() {
+	for _, it := range t.items {
+		it.stop()
 	}
-	return t.items[t.winner.value].item
 }
 
 func parent(i int) int {
