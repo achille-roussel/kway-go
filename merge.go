@@ -26,15 +26,15 @@ func MergeFunc[V any](cmp func(V, V) int, seqs ...iter.Seq[V]) iter.Seq[V] {
 	case 1:
 		return seqs[0]
 	case 2:
-		seq0 := bufferedFunc(bufferSize, seqs[0])
-		seq1 := bufferedFunc(bufferSize, seqs[1])
-		return debuffer(merge2(cmp, seq0, seq1))
+		seq0 := buffer(bufferSize, seqs[0])
+		seq1 := buffer(bufferSize, seqs[1])
+		return unbuffer(merge2(cmp, seq0, seq1))
 	default:
 		bufferedSeqs := make([]iter.Seq[[]V], len(seqs))
 		for i, seq := range seqs {
-			bufferedSeqs[i] = bufferedFunc(bufferSize, seq)
+			bufferedSeqs[i] = buffer(bufferSize, seq)
 		}
-		return debuffer(merge(cmp, bufferedSeqs))
+		return unbuffer(merge(cmp, bufferedSeqs))
 	}
 }
 
@@ -55,8 +55,27 @@ func MergeSliceFunc[V any](cmp func(V, V) int, seqs ...iter.Seq[[]V]) iter.Seq[[
 	}
 }
 
-//go:noinline
-func debuffer[V any](seq iter.Seq[[]V]) iter.Seq[V] {
+func buffer[V any](bufferSize int, seq iter.Seq[V]) iter.Seq[[]V] {
+	buf := make([]V, bufferSize)
+	return func(yield func([]V) bool) {
+		n := 0
+
+		for buf[n] = range seq {
+			if n++; n == len(buf) {
+				if !yield(buf) {
+					return
+				}
+				n = 0
+			}
+		}
+
+		if n > 0 {
+			yield(buf[:n])
+		}
+	}
+}
+
+func unbuffer[V any](seq iter.Seq[[]V]) iter.Seq[V] {
 	return func(yield func(V) bool) {
 		seq(func(values []V) bool {
 			for _, value := range values {
@@ -69,7 +88,6 @@ func debuffer[V any](seq iter.Seq[[]V]) iter.Seq[V] {
 	}
 }
 
-//go:noinline
 func merge2[V any](cmp func(V, V) int, seq0, seq1 iter.Seq[[]V]) iter.Seq[[]V] {
 	return func(yield func([]V) bool) {
 		next0, stop0 := iter.Pull(seq0)
@@ -80,6 +98,7 @@ func merge2[V any](cmp func(V, V) int, seq0, seq1 iter.Seq[[]V]) iter.Seq[[]V] {
 
 		values0, ok0 := next0()
 		values1, ok1 := next1()
+
 		buffer := make([]V, bufferSize)
 		offset := 0
 
@@ -134,43 +153,30 @@ func merge2[V any](cmp func(V, V) int, seq0, seq1 iter.Seq[[]V]) iter.Seq[[]V] {
 			}
 		}
 
-		flush(yield, next0, values0, ok0)
-		flush(yield, next1, values1, ok1)
+		for ok0 && yield(values0) {
+			values0, ok0 = next0()
+		}
+
+		for ok1 && yield(values1) {
+			values1, ok1 = next1()
+		}
 	}
 }
 
-func flush[V any](yield func([]V) bool, next func() ([]V, bool), values []V, ok bool) {
-	for ok && yield(values) {
-		values, ok = next()
-	}
-}
-
-//go:noinline
 func merge[V any](cmp func(V, V) int, seqs []iter.Seq[[]V]) iter.Seq[[]V] {
 	return func(yield func([]V) bool) {
 		tree := makeTree(seqs...)
 		defer tree.stop()
 
 		buffer := make([]V, bufferSize)
-		offset := 0
-
 		for {
-			v, ok := tree.next(cmp)
-			if !ok {
-				break
+			n := tree.next(buffer, cmp)
+			if n == 0 {
+				return
 			}
-			buffer[offset] = v
-			offset++
-			if offset == len(buffer) {
-				if !yield(buffer) {
-					return
-				}
-				offset = 0
+			if !yield(buffer[:n]) {
+				return
 			}
-		}
-
-		if offset > 0 {
-			yield(buffer[:offset])
 		}
 	}
 }

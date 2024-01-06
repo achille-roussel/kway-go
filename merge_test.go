@@ -111,13 +111,26 @@ func TestMerge(t *testing.T) {
 
 func BenchmarkMergeSliceOne(b *testing.B) {
 	benchmarkSlice(b, func(n int, cmp func(int, int) int) iter.Seq[[]int] {
-		return MergeSliceFunc(cmp, countSlice(n, 10))
+		return MergeSliceFunc(cmp, countSlice(n, 100))
 	})
 }
 
 func BenchmarkMergeSliceTwo(b *testing.B) {
 	benchmarkSlice(b, func(n int, cmp func(int, int) int) iter.Seq[[]int] {
-		return MergeSliceFunc(cmp, countSlice(n, 100), countSlice(n, 127))
+		return MergeSliceFunc(cmp,
+			countSlice(n, 100),
+			countSlice(n, 127),
+		)
+	})
+}
+
+func BenchmarkMergeSliceThree(b *testing.B) {
+	benchmarkSlice(b, func(n int, cmp func(int, int) int) iter.Seq[[]int] {
+		return MergeSliceFunc(cmp,
+			countSlice(n, 100),
+			countSlice(n, 101),
+			countSlice(n, 127),
+		)
 	})
 }
 
