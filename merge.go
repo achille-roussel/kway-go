@@ -20,22 +20,25 @@ func Merge[V cmp.Ordered](seqs ...iter.Seq[V]) iter.Seq[V] {
 // function to determine the order of values. The sequences must be ordered
 // by the same comparison function.
 func MergeFunc[V any](cmp func(V, V) int, seqs ...iter.Seq[V]) iter.Seq[V] {
-	switch len(seqs) {
-	case 0:
+	if len(seqs) == 0 {
 		return func(func(V) bool) {}
-	case 1:
+	}
+	if len(seqs) == 1 {
 		return seqs[0]
-	case 2:
+	}
+	var merged iter.Seq[[]V]
+	if len(seqs) == 2 {
 		seq0 := buffer(bufferSize, seqs[0])
 		seq1 := buffer(bufferSize, seqs[1])
-		return unbuffer(merge2(cmp, seq0, seq1))
-	default:
+		merged = merge2(cmp, seq0, seq1)
+	} else {
 		bufferedSeqs := make([]iter.Seq[[]V], len(seqs))
 		for i, seq := range seqs {
 			bufferedSeqs[i] = buffer(bufferSize, seq)
 		}
-		return unbuffer(merge(cmp, bufferedSeqs))
+		merged = merge(cmp, bufferedSeqs)
 	}
+	return unbuffer(merged)
 }
 
 func MergeSlice[V cmp.Ordered](seqs ...iter.Seq[[]V]) iter.Seq[[]V] {
@@ -147,10 +150,8 @@ func merge2[V any](cmp func(V, V) int, seq0, seq1 iter.Seq[[]V]) iter.Seq[[]V] {
 			}
 		}
 
-		if offset > 0 {
-			if !yield(buffer[:offset]) {
-				return
-			}
+		if offset > 0 && !yield(buffer[:offset]) {
+			return
 		}
 
 		for ok0 && yield(values0) {
