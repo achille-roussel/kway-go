@@ -3,7 +3,7 @@ package kway
 import "iter"
 
 type tree[V any] struct {
-	items  []iterator[V]
+	items  []cursor[V]
 	nodes  []node
 	count  int
 	winner node
@@ -14,18 +14,45 @@ type node struct {
 	value int
 }
 
-func makeTree[V any](seqs ...iter.Seq[V]) tree[V] {
+type cursor[T any] struct {
+	item T
+	next func() (T, bool)
+	stop func()
+}
+
+//go:noinline
+func unbuffered[V any](next func() ([]V, bool), stop func()) (func() (V, bool), func()) {
+	var this struct {
+		values []V
+		index  int
+	}
+	return func() (value V, ok bool) {
+		for {
+			if this.index < len(this.values) {
+				value, ok = this.values[this.index], true
+				this.index++
+				return
+			}
+			this.values, ok = next()
+			if !ok {
+				return
+			}
+			this.index = 0
+		}
+	}, stop
+}
+
+func makeTree[V any](seqs ...iter.Seq[[]V]) tree[V] {
 	t := tree[V]{
-		items:  make([]iterator[V], 0, len(seqs)),
+		items:  make([]cursor[V], 0, len(seqs)),
 		winner: node{index: -1, value: -1},
 	}
 
 	for _, seq := range seqs {
-		buffer := make([]V, bufferSize)
-		next, stop := bufferedPull(buffer, seq)
+		next, stop := unbuffered(iter.Pull(seq))
 		v, ok := next()
 		if ok {
-			t.items = append(t.items, iterator[V]{
+			t.items = append(t.items, cursor[V]{
 				item: v,
 				next: next,
 				stop: stop,

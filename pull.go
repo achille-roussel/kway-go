@@ -3,7 +3,8 @@ package kway
 import "iter"
 
 //go:noinline
-func bufferedFunc[V any](buf []V, seq iter.Seq[V]) iter.Seq[[]V] {
+func bufferedFunc[V any](bufferSize int, seq iter.Seq[V]) iter.Seq[[]V] {
+	buf := make([]V, bufferSize)
 	return func(yield func([]V) bool) {
 		n := 0
 
@@ -23,8 +24,8 @@ func bufferedFunc[V any](buf []V, seq iter.Seq[V]) iter.Seq[[]V] {
 }
 
 //go:noinline
-func bufferedPull[V any](buf []V, seq iter.Seq[V]) (func() (V, bool), func()) {
-	next, stop := iter.Pull(bufferedFunc(buf, seq))
+func bufferedPull[V any](bufferSize int, seq iter.Seq[V]) (func() (V, bool), func()) {
+	next, stop := iter.Pull(bufferedFunc(bufferSize, seq))
 
 	var values []V
 	var offset int

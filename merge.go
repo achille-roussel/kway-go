@@ -10,16 +10,27 @@ const (
 	bufferSize = 128
 )
 
+func BulkMerge[V cmp.Ordered](seqs ...iter.Seq[[]V]) iter.Seq[V] {
+	return BulkMergeFunc(cmp.Compare[V], seqs...)
+}
+
+func BulkMergeFunc[V any](cmp func(V, V) int, seqs ...iter.Seq[[]V]) iter.Seq[V] {
+	switch len(seqs) {
+	case 0:
+		return merge0[V]()
+	case 1:
+		return merge1(seqs[0])
+	case 2:
+		return merge2(cmp, seqs[0], seqs[1])
+	default:
+		return mergeN(cmp, seqs)
+	}
+}
+
 // Merge merges multiple sequences into one. The sequences must produce ordered
 // values.
 func Merge[V cmp.Ordered](seqs ...iter.Seq[V]) iter.Seq[V] {
 	return MergeFunc(cmp.Compare[V], seqs...)
-}
-
-// Merge2 merges multiple sequences of key-value pairs into one. The sequences
-// must produce ordered keys.
-func Merge2[K cmp.Ordered, V any](seqs ...iter.Seq2[K, V]) iter.Seq2[K, V] {
-	return Merge2Func(cmp.Compare[K], seqs...)
 }
 
 // MergeFunc merges multiple sequences into one using the given comparison
@@ -28,101 +39,109 @@ func Merge2[K cmp.Ordered, V any](seqs ...iter.Seq2[K, V]) iter.Seq2[K, V] {
 func MergeFunc[V any](cmp func(V, V) int, seqs ...iter.Seq[V]) iter.Seq[V] {
 	switch len(seqs) {
 	case 0:
-		return merge0(cmp)
+		return merge0[V]()
 	case 1:
-		return merge1(cmp, seqs[0])
+		return seqs[0]
 	case 2:
-		return merge2(cmp, seqs[0], seqs[1])
+		seq0 := bufferedFunc(bufferSize, seqs[0])
+		seq1 := bufferedFunc(bufferSize, seqs[1])
+		return merge2(cmp, seq0, seq1)
 	default:
-		return mergeN(cmp, seqs)
+		bufferedSeqs := make([]iter.Seq[[]V], len(seqs))
+		for i, seq := range seqs {
+			bufferedSeqs[i] = bufferedFunc(bufferSize, seq)
+		}
+		return mergeN(cmp, bufferedSeqs)
 	}
 }
 
-// Merge2Func merges multiple sequences of key-value pairs into one using the
-// given comparison function to determine the order of values. The sequences
-// must be ordered by the same comparison function.
-func Merge2Func[K, V any](cmp func(K, K) int, seqs ...iter.Seq2[K, V]) iter.Seq2[K, V] {
-	pairs := make([]iter.Seq[pair[K, V]], 0, 8)
-	for _, seq := range seqs {
-		pairs = append(pairs, func(yield func(pair[K, V]) bool) {
-			seq(func(k K, v V) bool { return yield(pair[K, V]{k, v}) })
+//go:noinline
+func merge0[V any]() iter.Seq[V] {
+	return func(func(V) bool) {}
+}
+
+//go:noinline
+func merge1[V any](seq iter.Seq[[]V]) iter.Seq[V] {
+	return func(yield func(V) bool) {
+		seq(func(values []V) bool {
+			for _, value := range values {
+				if !yield(value) {
+					return false
+				}
+			}
+			return true
 		})
 	}
-	seq := MergeFunc(comparePairs[K, V](cmp), pairs...)
-	return func(yield func(K, V) bool) { seq(func(p pair[K, V]) bool { return yield(p.k, p.v) }) }
 }
 
-type iterator[T any] struct {
-	item T
-	next func() (T, bool)
-	stop func()
-}
-
-type pair[K, V any] struct {
-	k K
-	v V
-}
-
-func comparePairs[K, V any](cmp func(K, K) int) func(p1, p2 pair[K, V]) int {
-	return func(p1, p2 pair[K, V]) int { return cmp(p1.k, p2.k) }
-}
-
-func merge0[V any](cmp func(V, V) int) iter.Seq[V] {
-	return func(yield func(V) bool) {}
-}
-
-func merge1[V any](cmp func(V, V) int, seq0 iter.Seq[V]) iter.Seq[V] {
-	return seq0
-}
-
-func merge2[V any](cmp func(V, V) int, seq0, seq1 iter.Seq[V]) iter.Seq[V] {
+//go:noinline
+func merge2[V any](cmp func(V, V) int, seq0, seq1 iter.Seq[[]V]) iter.Seq[V] {
 	return func(yield func(V) bool) {
-		buf0 := make([]V, bufferSize)
-		buf1 := make([]V, bufferSize)
-
-		next0, stop0 := bufferedPull(buf0, seq0)
+		next0, stop0 := iter.Pull(seq0)
 		defer stop0()
 
-		next1, stop1 := bufferedPull(buf1, seq1)
+		next1, stop1 := iter.Pull(seq1)
 		defer stop1()
 
-		v0, ok0 := next0()
-		v1, ok1 := next1()
+		values0, ok0 := next0()
+		values1, ok1 := next1()
 
 		for ok0 && ok1 {
-			var value V
-			if cmp(v0, v1) < 0 {
-				value = v0
-				v0, ok0 = next0()
-			} else {
-				value = v1
-				v1, ok1 = next1()
+			i0 := 0
+			i1 := 0
+
+			for i0 < len(values0) && i1 < len(values1) {
+				v0 := values0[i0]
+				v1 := values1[i1]
+
+				diff := cmp(v0, v1)
+				cont := false
+				switch {
+				case diff < 0:
+					cont = yield(v0)
+					i0++
+				case diff > 0:
+					cont = yield(v1)
+					i1++
+				default:
+					cont = yield(v0) && yield(v1)
+					i0++
+					i1++
+				}
+				if !cont {
+					return
+				}
 			}
+
+			if i0 == len(values0) {
+				i0 = 0
+				values0, ok0 = next0()
+			}
+
+			if i1 == len(values1) {
+				i1 = 0
+				values1, ok1 = next1()
+			}
+		}
+
+		flush(yield, next0, values0, ok0)
+		flush(yield, next1, values1, ok1)
+	}
+}
+
+func flush[V any](yield func(V) bool, next func() ([]V, bool), values []V, ok bool) {
+	for ok {
+		for _, value := range values {
 			if !yield(value) {
 				return
 			}
 		}
-
-		if ok0 && yield(v0) {
-			yieldAll(yield, next0)
-		}
-		if ok1 && yield(v1) {
-			yieldAll(yield, next1)
-		}
+		values, ok = next()
 	}
 }
 
-func yieldAll[V any](yield func(V) bool, next func() (V, bool)) {
-	var value V
-	var ok = true
-	for ok {
-		if value, ok = next(); ok {
-			ok = yield(value)
-		}
-	}
-}
-
-func mergeN[V any](cmp func(V, V) int, seqs []iter.Seq[V]) iter.Seq[V] {
+//go:noinline
+func mergeN[V any](cmp func(V, V) int, seqs []iter.Seq[[]V]) iter.Seq[V] {
 	return func(yield func(V) bool) {
 		tree := makeTree(seqs...)
 		defer tree.stop()
