@@ -3,10 +3,10 @@ package kway
 import "iter"
 
 type tree[V any] struct {
-	items  []cursor[V]
-	nodes  []node
-	count  int
-	winner node
+	cursors []cursor[V]
+	nodes   []node
+	count   int
+	winner  node
 }
 
 type node struct {
@@ -44,15 +44,15 @@ func unbuffered[V any](next func() ([]V, bool), stop func()) (func() (V, bool), 
 
 func makeTree[V any](seqs ...iter.Seq[[]V]) tree[V] {
 	t := tree[V]{
-		items:  make([]cursor[V], 0, len(seqs)),
-		winner: node{index: -1, value: -1},
+		cursors: make([]cursor[V], 0, len(seqs)),
+		winner:  node{index: -1, value: -1},
 	}
 
 	for _, seq := range seqs {
 		next, stop := unbuffered(iter.Pull(seq))
 		v, ok := next()
 		if ok {
-			t.items = append(t.items, cursor[V]{
+			t.cursors = append(t.cursors, cursor[V]{
 				item: v,
 				next: next,
 				stop: stop,
@@ -60,8 +60,8 @@ func makeTree[V any](seqs ...iter.Seq[[]V]) tree[V] {
 		}
 	}
 
-	t.count = len(t.items)
-	t.nodes = make([]node, 2*len(t.items))
+	t.count = len(t.cursors)
+	t.nodes = make([]node, 2*len(t.cursors))
 
 	head := t.nodes[:len(t.nodes)/2]
 	tail := t.nodes[len(t.nodes)/2:]
@@ -96,7 +96,7 @@ func (t *tree[V]) playGame(n1, n2 node, cmp func(V, V) int) (loser, winner node)
 	if n2.value < 0 {
 		return n2, n1
 	}
-	if cmp(t.items[n1.value].item, t.items[n2.value].item) < 0 {
+	if cmp(t.cursors[n1.value].item, t.cursors[n2.value].item) < 0 {
 		return n2, n1
 	} else {
 		return n1, n2
@@ -110,10 +110,10 @@ func (t *tree[V]) next(cmp func(V, V) int) (value V, ok bool) {
 
 	if t.winner.index < 0 {
 		t.winner = t.initialize(0, cmp)
-		return t.items[t.winner.value].item, true
+		return t.cursors[t.winner.value].item, true
 	}
 
-	it := &t.items[t.winner.value]
+	it := &t.cursors[t.winner.value]
 	v, ok := it.next()
 	if ok {
 		it.item = v
@@ -136,21 +136,21 @@ func (t *tree[V]) next(cmp func(V, V) int) (value V, ok bool) {
 		case player.value < 0:
 		case winner.value < 0:
 			t.nodes[offset], winner = winner, player
-		case cmp(t.items[player.value].item, t.items[winner.value].item) < 0:
+		case cmp(t.cursors[player.value].item, t.cursors[winner.value].item) < 0:
 			t.nodes[offset], winner = winner, player
 		}
 
 		if offset == 0 {
 			t.winner = winner
-			return t.items[t.winner.value].item, true
+			return t.cursors[t.winner.value].item, true
 		}
 		offset = parent(offset)
 	}
 }
 
 func (t *tree[V]) stop() {
-	for _, it := range t.items {
-		it.stop()
+	for _, c := range t.cursors {
+		c.stop()
 	}
 }
 
