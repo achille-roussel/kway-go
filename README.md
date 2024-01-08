@@ -39,12 +39,12 @@ for value := range kway.Merge(seq0, seq1, seq2) {
 }
 ```
 
-More examples are available in the [Go doc](godoc).
+More examples are available in the [Go doc][godoc].
 
 ## Implementation
 
 The K-way merge algorithm was inspired by the talk from
-[Bryan Boreham](bboreham) at [Gophercon 2023](gophercon), which described
+[Bryan Boreham][bboreham] at [Gophercon 2023][gophercon], which described
 how using a loser-tree instead of a min-heap improved performance of Loki's
 merge of log records.
 
@@ -178,8 +178,8 @@ Now we made the algorithm **3-4x faster**, and have performance in the range of
 It is interesting to note that the CPU profile didn't seem to indicate that 75%
 of the time was spent in the runtime, but reducing the time spent in that code
 path has had a non-linear impact on performance. Likely some other CPU
-instruction pipeline and caching shenanigans are at play here, possibly due to
-the use of atomic compare-and-swap operations in coroutine switches.
+instruction pipeline and caching shenanigans are at play here, possibly impacted
+by the atomic compare-and-swap operations in coroutine switches.
 
 As expected, the CPU profile now shows that almost no time is spent in the
 runtime:
