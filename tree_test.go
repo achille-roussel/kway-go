@@ -7,12 +7,12 @@ import (
 	"testing"
 )
 
-func words[T any](values ...T) iter.Seq[[]T] {
-	return func(yield func([]T) bool) {
+func words[T any](values ...T) iter.Seq2[[]T, error] {
+	return func(yield func([]T, error) bool) {
 		var v [1]T
 		for _, v[0] = range values {
-			if !yield(v[:]) {
-				return
+			if !yield(v[:], nil) {
+				break
 			}
 		}
 	}
@@ -76,15 +76,22 @@ func TestTree(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.scenario, func(t *testing.T) {
-			var seqs = make([]iter.Seq[[]string], len(test.sequences))
+			var seqs = make([]iter.Seq2[[]string, error], len(test.sequences))
 			for i, seq := range test.sequences {
 				seqs[i] = words(seq...)
 			}
 
-			var tree = makeTree(seqs...)
+			var tree, _ = buildTree(seqs...)
 			var values []string
 			var buffer [1]string
-			for tree.next(buffer[:], strings.Compare) != 0 {
+			for {
+				n, err := tree.next(buffer[:], strings.Compare)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if n == 0 {
+					break
+				}
 				values = append(values, buffer[0])
 			}
 
