@@ -239,7 +239,7 @@ there is no need to iterate over the slices and increment the counter by one
 each time, we can batch the operation by incrementing the counter by the length
 of the slice, achieving much higher throughput than predicted by the baseline:
 ```
-MergeSlice2  477720793  2.273 ns/op  0.6688 comp/op	 439971259 merge/s
+MergeSlice2  477720793  2.273 ns/op  0.6688 comp/op  439971259 merge/s
 MergeSlice3  150406080  7.945 ns/op  1.667 comp/op   125861613 merge/s
 ```
 
