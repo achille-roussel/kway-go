@@ -54,8 +54,8 @@ union of two sets which has a much lower compute and memory footprint.
 
 ## Performance
 
-K-way merge is often used in stream processing or database engines to make
-merge distributed query results into a single ordered result set. In those
+K-way merge is often used in stream processing or database engines to merge
+distributed query results into a single ordered result set. In those
 applications, performance of the underlying algorithms tend to matter: for
 example, when performing compaction of sorted records, the merge algorithm is
 on the critical path and often where most of the compute is being spent. In that
