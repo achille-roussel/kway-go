@@ -1,4 +1,4 @@
-# kway-go
+# kway-go [![Go Reference](https://pkg.go.dev/badge/github.com/achille-roussel/kway-go.svg)](https://pkg.go.dev/github.com/achille-roussel/kway-go)
 K-way merge with Go 1.22 range functions
 
 [bboreham]: https://github.com/bboreham
