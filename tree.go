@@ -164,9 +164,9 @@ func right(i int) int {
 	return (2 * i) + 2
 }
 
-func nextNonEmptyValues[T any](next func() ([]T, error, bool)) ([]T, error, bool) {
+func nextNonEmptyValues[T any](next func() ([]T, error, bool)) (values []T, err error, ok bool) {
 	for {
-		values, err, ok := next()
+		values, err, ok = next()
 		if len(values) > 0 || err != nil || !ok {
 			return values, err, ok
 		}
