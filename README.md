@@ -2,7 +2,7 @@
 K-way merge with Go 1.22 range functions
 
 [bboreham]: https://github.com/bboreham
-[godoc]: https://pkg.go.dev/github.com/achille-roussel/kway-go
+[godoc]: https://pkg.go.dev/github.com/achille-roussel/kway-go@v0.2.0#pkg-examples
 [gophercon]: https://www.gophercon.com/agenda/session/1160355
 
 ## Installation

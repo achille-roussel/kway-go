@@ -19,9 +19,9 @@ func ExampleMerge() {
 	}
 
 	for value, err := range kway.Merge(
-		sequence(0, 5, 1),
-		sequence(1, 5, 2),
-		sequence(2, 5, 3),
+		sequence(0, 5, 1), // 0,1,2,3,4
+		sequence(1, 5, 2), // 1,3
+		sequence(2, 5, 3), // 2
 	) {
 		if err != nil {
 			panic(err)
@@ -49,9 +49,9 @@ func ExampleMergeSlice() {
 	}
 
 	for values, err := range kway.MergeSlice(
-		sequence(0, 5, 1, 2),
-		sequence(1, 5, 2, 2),
-		sequence(2, 5, 3, 2),
+		sequence(0, 5, 1, 2), // [0,1],[1,2],[2,3],[3,4],[4,5]
+		sequence(1, 5, 2, 2), // [1,2],[3,4]
+		sequence(2, 5, 3, 2), // [2,3]
 	) {
 		if err != nil {
 			panic(err)
