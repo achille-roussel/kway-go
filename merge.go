@@ -83,9 +83,6 @@ func Merge[T cmp.Ordered](seqs ...iter.Seq2[T, error]) iter.Seq2[T, error] {
 //
 // See Merge for more details.
 func MergeFunc[T any](cmp func(T, T) int, seqs ...iter.Seq2[T, error]) iter.Seq2[T, error] {
-	if len(seqs) == 0 {
-		return func(func(T, error) bool) {}
-	}
 	if len(seqs) == 1 {
 		return seqs[0]
 	}
@@ -126,7 +123,7 @@ func MergeFunc[T any](cmp func(T, T) int, seqs ...iter.Seq2[T, error]) iter.Seq2
 //		}
 //		values = append(values, vs)
 //	}
-//	// Using values here may not contain the expected content, each slice might
+//	// Using values here may not contain the expected data, each slice might
 //	// point to the same backing array and only contain values from the last
 //	// iteration.
 //
@@ -156,8 +153,6 @@ func MergeSlice[T cmp.Ordered](seqs ...iter.Seq2[[]T, error]) iter.Seq2[[]T, err
 // See MergeSlice for more details.
 func MergeSliceFunc[T any](cmp func(T, T) int, seqs ...iter.Seq2[[]T, error]) iter.Seq2[[]T, error] {
 	switch len(seqs) {
-	case 0:
-		return func(func([]T, error) bool) {}
 	case 1:
 		return seqs[0]
 	case 2:

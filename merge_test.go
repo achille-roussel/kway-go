@@ -86,13 +86,13 @@ func values[T any](seq iter.Seq2[T, error]) (values []T, err error) {
 	return values, nil
 }
 
-func BenchmarkMergeOne(b *testing.B) {
+func BenchmarkMerge1(b *testing.B) {
 	benchmark(b, func(n int, cmp func(int, int) int) iter.Seq2[int, error] {
 		return MergeFunc(cmp, count(n))
 	})
 }
 
-func BenchmarkMergeTwo(b *testing.B) {
+func BenchmarkMerge2(b *testing.B) {
 	benchmark(b, func(n int, cmp func(int, int) int) iter.Seq2[int, error] {
 		return MergeFunc(cmp,
 			sequence(0, n-(n/4), 1),
@@ -101,7 +101,7 @@ func BenchmarkMergeTwo(b *testing.B) {
 	})
 }
 
-func BenchmarkMergeThree(b *testing.B) {
+func BenchmarkMerge3(b *testing.B) {
 	benchmark(b, func(n int, cmp func(int, int) int) iter.Seq2[int, error] {
 		return MergeFunc(cmp,
 			sequence(0, n, 2),
@@ -174,13 +174,13 @@ func concatValues[T any](seq iter.Seq2[[]T, error]) (values []T, err error) {
 	return values, nil
 }
 
-func BenchmarkMergeSliceOne(b *testing.B) {
+func BenchmarkMergeSlice1(b *testing.B) {
 	benchmarkSlice(b, func(n int, cmp func(int, int) int) iter.Seq2[[]int, error] {
 		return MergeSliceFunc(cmp, countSlice(n, 100))
 	})
 }
 
-func BenchmarkMergeSliceTwo(b *testing.B) {
+func BenchmarkMergeSlice2(b *testing.B) {
 	benchmarkSlice(b, func(n int, cmp func(int, int) int) iter.Seq2[[]int, error] {
 		return MergeSliceFunc(cmp,
 			countSlice(n, 100),
@@ -189,7 +189,7 @@ func BenchmarkMergeSliceTwo(b *testing.B) {
 	})
 }
 
-func BenchmarkMergeSliceThree(b *testing.B) {
+func BenchmarkMergeSlice3(b *testing.B) {
 	benchmarkSlice(b, func(n int, cmp func(int, int) int) iter.Seq2[[]int, error] {
 		return MergeSliceFunc(cmp,
 			countSlice(n, 100),
