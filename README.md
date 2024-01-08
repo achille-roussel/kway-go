@@ -31,7 +31,7 @@ The sequences being merged must each be ordered using the same comparison logic
 than the one used for the merge, or the algorithm will not be able to produce an
 ordered sequence of values.
 
-The following code snipets illustrates how to merge three ordered sequences
+The following code snippets illustrates how to merge three ordered sequences
 into one:
 ```go
 for value := range kway.Merge(seq0, seq1, seq2) {
@@ -157,7 +157,7 @@ opportunities for inlining or other optimizations.
 
 We basically have a very high baseline cost for each operation, with the
 hypothesis that it is driven by coroutine context switch implemented in the
-runtime, the only thing we can do to improve performacne is doing less of these.
+runtime, the only thing we can do to improve performance is doing less of these.
 
 This is a typical a baseline cost amortization problem: we want to call the
 `next` function returned by `iter.Pull2` less often, which can be done by
@@ -231,7 +231,7 @@ Applications that fall into those categories can unlock further performance by
 using `MergeSlice` instead of `Merge`, which works on `iter.Seq2[[]T, error]`
 end-to-end.
 
-What is interesting with this appraoch is that in cases where the processing of
+What is interesting with this approach is that in cases where the processing of
 inputs and outputs can be batched, this model **can even beat the theoretical
 throughput limit**. For example, in the benchmarks we've used, the body of the
 loop consuming merged values simply counts the results. When consuming slices

@@ -1,4 +1,4 @@
-// Package kway impements k-way merge algorithms for range functions.
+// Package kway implements k-way merge algorithms for range functions.
 package kway
 
 import (
@@ -11,12 +11,12 @@ const (
 	// sequences.
 	//
 	// Note: I would like to avoid making this configurable, but I am also
-	// aware that in latency-sensitive applications, it might be preferrable
+	// aware that in latency-sensitive applications, it might be preferable
 	// to have a smaller buffer size (or none at all), so values are produced
 	// as soon as they are available. I would like to delay this change until
 	// there is production data available to prove that it is needed, in my
 	// experience, k-way merges tend to be used in batch processing systems
-	// where throughput matters more than latency. One appraoch I would like
+	// where throughput matters more than latency. One approach I would like
 	// to experiment with is exponentially growing the buffer size (up to a
 	// limit), so the merge algorithm can start with a small buffer size which
 	// allows the first few values to be produces immediately, and then grow
@@ -148,7 +148,7 @@ func MergeSlice[T cmp.Ordered](seqs ...iter.Seq2[[]T, error]) iter.Seq2[[]T, err
 
 // MergeSliceFunc merges multiple sequences producing slices of ordered values
 // using the given comparison function to determine the order. The sequences
-// must be ordered bythe same comparison function.
+// must be ordered by the same comparison function.
 //
 // See MergeSlice for more details.
 func MergeSliceFunc[T any](cmp func(T, T) int, seqs ...iter.Seq2[[]T, error]) iter.Seq2[[]T, error] {
