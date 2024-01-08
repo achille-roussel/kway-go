@@ -2,119 +2,116 @@ package kway
 
 import (
 	"cmp"
+	"fmt"
 	"iter"
 	"slices"
 	"testing"
 	"time"
 )
 
-func count(n int) iter.Seq[int] {
-	return func(yield func(int) bool) {
+//go:noinline
+func countSlice(n, r int) iter.Seq2[[]int, error] {
+	return func(yield func([]int, error) bool) {
+		values := make([]int, r)
 		for i := range n {
-			if !yield(i) {
+			n := i * r
+			for j := range values {
+				values[j] = n + j
+			}
+			if !yield(values, nil) {
 				return
 			}
 		}
 	}
 }
 
-func squares(n int) iter.Seq[int] {
-	return func(yield func(int) bool) {
+//go:noinline
+func count(n int) iter.Seq2[int, error] {
+	return func(yield func(int, error) bool) {
 		for i := range n {
-			if !yield(i * i) {
+			if !yield(i, nil) {
 				return
 			}
 		}
 	}
 }
 
-func count2(n int) iter.Seq2[int, int] {
-	return func(yield func(int, int) bool) {
-		for i := range n {
-			if !yield(i, i) {
-				return
-			}
-		}
-	}
-}
-
-func squares2(n int) iter.Seq2[int, int] {
-	return func(yield func(int, int) bool) {
-		for i := range n {
-			if !yield(i, i*i) {
-				return
-			}
-		}
-	}
-}
-
-func sequence(min, max, step int) iter.Seq[int] {
-	return func(yield func(int) bool) {
+//go:noinline
+func sequence(min, max, step int) iter.Seq2[int, error] {
+	return func(yield func(int, error) bool) {
 		for i := min; i < max; i += step {
-			if !yield(i) {
+			if !yield(i, nil) {
 				return
 			}
-		}
-	}
-}
-
-func sequence2(min, max, step int) iter.Seq2[int, int] {
-	return func(yield func(int, int) bool) {
-		for i, j := 0, min; j < max; j += step {
-			if !yield(i, j) {
-				return
-			}
-			i++
 		}
 	}
 }
 
 func TestMerge(t *testing.T) {
-	m := Merge(count(1), count(2), count(3))
+	for n := range 10 {
+		t.Run(fmt.Sprint(n), func(t *testing.T) {
+			seqs := make([]iter.Seq2[int, error], n)
+			want := make([]int, 0, 2*n)
 
-	var values []int
-	for v := range m {
-		values = append(values, v)
-	}
+			for i := range seqs {
+				seqs[i] = count(i)
+				v, err := values(count(i))
+				if err != nil {
+					t.Fatal(err)
+				}
+				want = append(want, v...)
+			}
 
-	if len(values) != 6 {
-		t.Errorf("expected 6 values, got %d", len(values))
-	}
-	if !slices.Equal(values, []int{0, 0, 0, 1, 1, 2}) {
-		t.Errorf("expected [0, 0, 0, 1, 1, 2], got %v", values)
+			slices.Sort(want)
+			seq := Merge(seqs...)
+
+			got, err := values(seq)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(got, want) {
+				t.Errorf("expected %v, got %v", want, got)
+			}
+		})
 	}
 }
 
-func BenchmarkMergeOne(b *testing.B) {
-	benchmark(b, func(n int, cmp func(int, int) int) iter.Seq[int] {
+func values[T any](seq iter.Seq2[T, error]) (values []T, err error) {
+	for v, err := range seq {
+		if err != nil {
+			return nil, err
+		}
+		values = append(values, v)
+	}
+	return values, nil
+}
+
+func BenchmarkMerge1(b *testing.B) {
+	benchmark(b, func(n int, cmp func(int, int) int) iter.Seq2[int, error] {
 		return MergeFunc(cmp, count(n))
 	})
 }
 
-func BenchmarkMergeTwo(b *testing.B) {
-	benchmark(b, func(n int, cmp func(int, int) int) iter.Seq[int] {
-		return MergeFunc(cmp, count(n/2), squares(n/2))
-	})
-}
-
-func BenchmarkMergeTen(b *testing.B) {
-	benchmark(b, func(n int, cmp func(int, int) int) iter.Seq[int] {
+func BenchmarkMerge2(b *testing.B) {
+	benchmark(b, func(n int, cmp func(int, int) int) iter.Seq2[int, error] {
 		return MergeFunc(cmp,
-			sequence(0, 1*n/10, 1),
-			sequence(1, 2*n/10, 2),
-			sequence(2, 3*n/10, 3),
-			sequence(3, 4*n/10, 4),
-			sequence(4, 5*n/10, 5),
-			sequence(5, 6*n/10, 6),
-			sequence(6, 7*n/10, 7),
-			sequence(7, 8*n/10, 8),
-			sequence(8, 9*n/10, 9),
-			sequence(9, 10*n/10, 10),
+			sequence(0, n-(n/4), 1),
+			sequence(n/4, n, 2),
 		)
 	})
 }
 
-func benchmark[V cmp.Ordered](b *testing.B, merge func(int, func(V, V) int) iter.Seq[V]) {
+func BenchmarkMerge3(b *testing.B) {
+	benchmark(b, func(n int, cmp func(int, int) int) iter.Seq2[int, error] {
+		return MergeFunc(cmp,
+			sequence(0, n, 2),
+			sequence(n/4, n, 1),
+			sequence(n/3, n, 3),
+		)
+	})
+}
+
+func benchmark[V cmp.Ordered](b *testing.B, merge func(int, func(V, V) int) iter.Seq2[V, error]) {
 	comparisons := 0
 	compare := func(a, b V) int {
 		comparisons++
@@ -122,57 +119,104 @@ func benchmark[V cmp.Ordered](b *testing.B, merge func(int, func(V, V) int) iter
 	}
 	start := time.Now()
 	count := b.N
-	for _ = range merge(count, compare) {
+	for _, err := range merge(count, compare) {
+		if err != nil {
+			b.Fatal(err)
+		}
 		if count--; count == 0 {
 			break
 		}
+	}
+	if count != 0 {
+		b.Fatalf("expected %d values, got %d", b.N, b.N-count)
 	}
 	duration := time.Since(start)
 	b.ReportMetric(float64(b.N)/duration.Seconds(), "merge/s")
 	b.ReportMetric(float64(comparisons)/float64(b.N), "comp/op")
 }
 
-func BenchmarkMerge2One(b *testing.B) {
-	benchmark2(b, func(n int, cmp func(int, int) int) iter.Seq2[int, int] {
-		return Merge2Func(cmp, count2(n))
+func TestMergeSlice(t *testing.T) {
+	for n := range 10 {
+		t.Run(fmt.Sprint(n), func(t *testing.T) {
+			seqs := make([]iter.Seq2[[]int, error], n)
+			want := make([]int, 0, 2*n)
+
+			for i := range seqs {
+				seqs[i] = countSlice(i, 10)
+				v, err := values(count(i * 10))
+				if err != nil {
+					t.Fatal(err)
+				}
+				want = append(want, v...)
+			}
+
+			slices.Sort(want)
+			seq := MergeSlice(seqs...)
+
+			got, err := concatValues(seq)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(got, want) {
+				t.Errorf("expected %v, got %v", want, got)
+			}
+		})
+	}
+}
+
+func concatValues[T any](seq iter.Seq2[[]T, error]) (values []T, err error) {
+	for v, err := range seq {
+		if err != nil {
+			return nil, err
+		}
+		values = append(values, v...)
+	}
+	return values, nil
+}
+
+func BenchmarkMergeSlice1(b *testing.B) {
+	benchmarkSlice(b, func(n int, cmp func(int, int) int) iter.Seq2[[]int, error] {
+		return MergeSliceFunc(cmp, countSlice(n, 100))
 	})
 }
 
-func BenchmarkMerge2Two(b *testing.B) {
-	benchmark2(b, func(n int, cmp func(int, int) int) iter.Seq2[int, int] {
-		return Merge2Func(cmp, count2(n/2), squares2(n/2))
-	})
-}
-
-func BenchmarkMerge2Ten(b *testing.B) {
-	benchmark2(b, func(n int, cmp func(int, int) int) iter.Seq2[int, int] {
-		return Merge2Func(cmp,
-			sequence2(0, 1*n/10, 1),
-			sequence2(1, 2*n/10, 2),
-			sequence2(2, 3*n/10, 3),
-			sequence2(3, 4*n/10, 4),
-			sequence2(4, 5*n/10, 5),
-			sequence2(5, 6*n/10, 6),
-			sequence2(6, 7*n/10, 7),
-			sequence2(7, 8*n/10, 8),
-			sequence2(8, 9*n/10, 9),
-			sequence2(9, 10*n/10, 10),
+func BenchmarkMergeSlice2(b *testing.B) {
+	benchmarkSlice(b, func(n int, cmp func(int, int) int) iter.Seq2[[]int, error] {
+		return MergeSliceFunc(cmp,
+			countSlice(n, 100),
+			countSlice(n, 127),
 		)
 	})
 }
 
-func benchmark2[K cmp.Ordered, V any](b *testing.B, merge func(int, func(K, K) int) iter.Seq2[K, V]) {
+func BenchmarkMergeSlice3(b *testing.B) {
+	benchmarkSlice(b, func(n int, cmp func(int, int) int) iter.Seq2[[]int, error] {
+		return MergeSliceFunc(cmp,
+			countSlice(n, 100),
+			countSlice(n, 101),
+			countSlice(n, 127),
+		)
+	})
+}
+
+func benchmarkSlice[V cmp.Ordered](b *testing.B, merge func(int, func(V, V) int) iter.Seq2[[]V, error]) {
 	comparisons := 0
-	compare := func(a, b K) int {
+	compare := func(a, b V) int {
 		comparisons++
 		return cmp.Compare(a, b)
 	}
 	start := time.Now()
 	count := b.N
-	for _, _ = range merge(count, compare) {
-		if count--; count == 0 {
+	for values, err := range merge(count, compare) {
+		if err != nil {
+			b.Fatal(err)
+		}
+		if count -= len(values); count <= 0 {
 			break
 		}
+	}
+	if count > 0 {
+		b.Fatalf("expected %d values, got %d", b.N, b.N-count)
 	}
 	duration := time.Since(start)
 	b.ReportMetric(float64(b.N)/duration.Seconds(), "merge/s")
