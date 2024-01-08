@@ -167,13 +167,13 @@ the `iter.Seq2[T, error]` sequences into `iter.Seq2[[]T, error]`. The call
 to `next` then only needs to happen when we exhaust the buffer, which ends up
 amortizing its cost.
 
-With an internal buffer size of 128 values per sequence:
+With an internal buffer size of **128** values per sequence:
 ```
 Merge2  190103247  6.133 ns/op  0.8333 comp/op  163045156 merge/s
 Merge3  95485022  12.74 ns/op   1.864 comp/op    78492807 merge/s
 ```
 Now we made the algorithm **3-4x faster**, and have performance in the range of
-**1.5 to 2.5x** the theortical throughput limit.
+**1.5 to 2.5x** the theoretical throughput limit.
 
 It is interesting to note that the CPU profile didn't seem to indicate that 75%
 of the time was spent in the runtime, but reducing the time spent in that code
