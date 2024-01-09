@@ -78,6 +78,12 @@ implementation of coroutines underneath `iter.Pull2` has a much lower compute
 footprint than using channels, it still has a significant overhead when reading
 values in tight loops of the merge algorithm.
 
+This graph shows a preview of the results, the full analysis is described in the
+following sections:
+
+![image](https://github.com/achille-roussel/kway-go/assets/865510/730da27c-e639-4cfe-878a-9cc5c9287e37)
+
+
 ### Establishing a performance baseline
 
 To explore performance, let's first establish a baseline. We use the throughput
