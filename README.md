@@ -17,13 +17,13 @@ enabling the rangefunc experiment.
 
 To download Go 1.22 rc1: https://pkg.go.dev/golang.org/dl/go1.22rc1
 ```
-$ go install golang.org/dl/go1.22rc1@latest
-$ go1.22rc1 download
+go install golang.org/dl/go1.22rc1@latest
+go1.22rc1 download
 ```
 Then to enable the rangefunc experiment, set the GOEXPERIMENT environment
 variable in the shell that executes the go commands:
 ```sh
-$ export GOEXPERIMENT=rangefunc
+export GOEXPERIMENT=rangefunc
 ```
 
 ## Usage
