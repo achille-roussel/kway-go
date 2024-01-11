@@ -4,6 +4,7 @@ K-way merge with Go 1.22 range functions
 [bboreham]: https://github.com/bboreham
 [godoc]: https://pkg.go.dev/github.com/achille-roussel/kway-go@v0.2.0#pkg-examples
 [gophercon]: https://www.gophercon.com/agenda/session/1160355
+[go1.22rc1]: https://gist.github.com/achille-roussel/5a9afe81c91891de4fad0bfe0965a9ea
 
 ## Installation
 
@@ -25,6 +26,9 @@ variable in the shell that executes the go commands:
 ```sh
 export GOEXPERIMENT=rangefunc
 ```
+
+For a more detailed guide of how to configure Go 1.22 with range functions see
+[Go 1.22 rc1 installation to enable the range functions experiment][go1.22rc1].
 
 ## Usage
 
