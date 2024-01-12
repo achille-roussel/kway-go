@@ -2,6 +2,7 @@ package kway
 
 import (
 	"cmp"
+	"errors"
 	"fmt"
 	"iter"
 	"slices"
@@ -73,6 +74,116 @@ func TestMerge(t *testing.T) {
 				t.Errorf("expected %v, got %v", want, got)
 			}
 		})
+	}
+}
+
+func TestMergeContinueAfterError2(t *testing.T) {
+	errval := errors.New("")
+
+	seq0 := func(yield func(int, error) bool) {
+		for i := 0; i < 5; i++ {
+			if !yield(i, nil) {
+				return
+			}
+		}
+		if !yield(0, errval) {
+			return
+		}
+		for i := 5; i < 10; i++ {
+			if !yield(i, nil) {
+				return
+			}
+		}
+	}
+
+	seq1 := func(yield func(int, error) bool) {
+		for i := 0; i < 10; i++ {
+			if !yield(i, nil) {
+				return
+			}
+		}
+	}
+
+	var values []int
+	var hasError bool
+	for v, err := range Merge(seq0, seq1) {
+		if err != nil {
+			if v != 0 {
+				t.Errorf("expected 0, got %v", v)
+			}
+			if err != errval {
+				t.Fatal(err)
+			}
+			hasError = true
+		} else {
+			values = append(values, v)
+		}
+	}
+
+	expect := []int{
+		0, 0, 1, 1, 2, 2, 3, 3, 4, 4,
+		5, 5, 6, 6, 7, 7, 8, 8, 9, 9,
+	}
+	if !slices.Equal(values, expect) {
+		t.Errorf("expected %v, got %v", expect, values)
+	}
+	if !hasError {
+		t.Error("expected error")
+	}
+}
+
+func TestMergeContinueAfterError3(t *testing.T) {
+	errval := errors.New("")
+
+	seq0 := func(yield func(int, error) bool) {
+		for i := 0; i < 5; i++ {
+			if !yield(i, nil) {
+				return
+			}
+		}
+		if !yield(0, errval) {
+			return
+		}
+		for i := 5; i < 10; i++ {
+			if !yield(i, nil) {
+				return
+			}
+		}
+	}
+
+	seq1 := func(yield func(int, error) bool) {
+		for i := 0; i < 10; i++ {
+			if !yield(i, nil) {
+				return
+			}
+		}
+	}
+
+	var values []int
+	var errCount int
+	for v, err := range Merge(seq0, seq1, seq0) {
+		if err != nil {
+			if v != 0 {
+				t.Errorf("expected 0, got %v", v)
+			}
+			if err != errval {
+				t.Fatal(err)
+			}
+			errCount++
+		} else {
+			values = append(values, v)
+		}
+	}
+
+	expect := []int{
+		0, 0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4, 4,
+		5, 5, 5, 6, 6, 6, 7, 7, 7, 8, 8, 8, 9, 9, 9,
+	}
+	if !slices.Equal(values, expect) {
+		t.Errorf("expected %v, got %v", expect, values)
+	}
+	if errCount != 2 {
+		t.Error("expected error")
 	}
 }
 

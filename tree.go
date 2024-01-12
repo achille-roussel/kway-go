@@ -1,6 +1,8 @@
 package kway
 
-import "iter"
+import (
+	"iter"
+)
 
 type tree[T any] struct {
 	cursors []cursor[T]
@@ -16,31 +18,20 @@ type node struct {
 
 type cursor[T any] struct {
 	values []T
+	err    error
 	next   func() ([]T, error, bool)
 	stop   func()
 }
 
-func buildTree[T any](seqs ...iter.Seq2[[]T, error]) (tree[T], error) {
+func makeTree[T any](seqs ...iter.Seq2[[]T, error]) tree[T] {
 	t := tree[T]{
-		cursors: make([]cursor[T], 0, len(seqs)),
+		cursors: make([]cursor[T], len(seqs)),
 		winner:  node{index: -1, value: -1},
 	}
 
-	for _, seq := range seqs {
+	for i, seq := range seqs {
 		next, stop := iter.Pull2(seq)
-		values, err, ok := nextNonEmptyValues(next)
-		if err != nil {
-			return t, err
-		}
-		if ok {
-			t.cursors = append(t.cursors, cursor[T]{
-				values: values,
-				next:   next,
-				stop:   stop,
-			})
-		} else {
-			stop()
-		}
+		t.cursors[i] = cursor[T]{next: next, stop: stop}
 	}
 
 	t.count = len(t.cursors)
@@ -55,7 +46,7 @@ func buildTree[T any](seqs ...iter.Seq2[[]T, error]) (tree[T], error) {
 	for i := range tail {
 		tail[i] = node{index: i + len(tail), value: i}
 	}
-	return t, nil
+	return t
 }
 
 func (t *tree[T]) initialize(i int, cmp func(T, T) int) node {
@@ -79,7 +70,15 @@ func (t *tree[T]) playGame(n1, n2 node, cmp func(T, T) int) (loser, winner node)
 	if n2.value < 0 {
 		return n2, n1
 	}
-	if cmp(t.cursors[n1.value].values[0], t.cursors[n2.value].values[0]) < 0 {
+	c1 := &t.cursors[n1.value]
+	c2 := &t.cursors[n2.value]
+	if c1.err != nil {
+		return n2, n1
+	}
+	if c2.err != nil {
+		return n1, n2
+	}
+	if cmp(c1.values[0], c2.values[0]) < 0 {
 		return n2, n1
 	} else {
 		return n1, n2
@@ -93,21 +92,41 @@ func (t *tree[T]) next(buf []T, cmp func(T, T) int) (n int, err error) {
 
 	winner := t.winner
 	if winner.index < 0 {
+		for i := range t.cursors {
+			c := &t.cursors[i]
+			values, err, ok := nextNonEmptyValues(c.next)
+			if ok {
+				c.values, c.err = values, err
+			} else {
+				c.stop()
+				t.nodes[i+len(t.cursors)] = node{index: -1, value: -1}
+				t.count--
+				continue
+			}
+		}
+		if t.count == 0 {
+			return 0, nil
+		}
 		winner = t.initialize(0, cmp)
-		buf[n] = t.cursors[winner.value].values[0]
-		n++
 	}
 
 	for n < len(buf) {
 		c := &t.cursors[winner.value]
-		c.values = c.values[1:]
+
+		if len(c.values) > 0 {
+			buf[n] = c.values[0]
+			n++
+			c.values = c.values[1:]
+		}
 
 		if len(c.values) == 0 {
+			if err = c.err; err != nil {
+				c.err = nil
+				break
+			}
 			values, err, ok := nextNonEmptyValues(c.next)
-			if err != nil {
-				return n, err
-			} else if ok {
-				c.values = values
+			if ok {
+				c.values, c.err = values, err
 			} else {
 				c.stop()
 				winner.value = -1
@@ -119,31 +138,29 @@ func (t *tree[T]) next(buf []T, cmp func(T, T) int) (n int, err error) {
 			}
 		}
 
-		offset := parent(winner.index)
-		for {
+		for offset := parent(winner.index); true; offset = parent(offset) {
 			player := t.nodes[offset]
 
-			switch {
-			case player.value < 0:
-			case winner.value < 0:
-				t.nodes[offset], winner = winner, player
-			case cmp(t.cursors[player.value].values[0], t.cursors[winner.value].values[0]) < 0:
-				t.nodes[offset], winner = winner, player
+			if player.value >= 0 {
+				if winner.value < 0 {
+					t.nodes[offset], winner = winner, player
+				} else {
+					c1 := &t.cursors[player.value]
+					c2 := &t.cursors[winner.value]
+					if len(c1.values) == 0 || (len(c2.values) != 0 && cmp(c1.values[0], c2.values[0]) < 0) {
+						t.nodes[offset], winner = winner, player
+					}
+				}
 			}
 
 			if offset == 0 {
 				break
 			}
-
-			offset = parent(offset)
 		}
-
-		buf[n] = t.cursors[winner.value].values[0]
-		n++
 	}
 
 	t.winner = winner
-	return n, nil
+	return n, err
 }
 
 func (t *tree[T]) stop() {

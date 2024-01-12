@@ -170,10 +170,10 @@ func buffer[T any](bufferSize int, seq iter.Seq2[T, error]) iter.Seq2[[]T, error
 		var err error
 		for buf[n], err = range seq {
 			if err != nil {
-				yield(nil, err)
-				return
-			}
-			if n++; n == len(buf) {
+				if !yield(nil, err) {
+					return
+				}
+			} else if n++; n == len(buf) {
 				if !yield(buf, nil) {
 					return
 				}
@@ -191,8 +191,8 @@ func unbuffer[T any](seq iter.Seq2[[]T, error]) iter.Seq2[T, error] {
 	return func(yield func(T, error) bool) {
 		seq(func(values []T, err error) bool {
 			var value T
-			if err != nil {
-				return yield(value, err)
+			if err != nil && !yield(value, err) {
+				return false
 			}
 			for _, value = range values {
 				if !yield(value, nil) {
@@ -213,14 +213,12 @@ func merge2[T any](cmp func(T, T) int, seq0, seq1 iter.Seq2[[]T, error]) iter.Se
 		defer stop1()
 
 		values0, err, ok0 := next0()
-		if err != nil {
-			yield(nil, err)
+		if err != nil && !yield(nil, err) {
 			return
 		}
 
 		values1, err, ok1 := next1()
-		if err != nil {
-			yield(nil, err)
+		if err != nil && !yield(nil, err) {
 			return
 		}
 
@@ -263,16 +261,14 @@ func merge2[T any](cmp func(T, T) int, seq0, seq1 iter.Seq2[[]T, error]) iter.Se
 
 			if i0 == len(values0) {
 				i0 = 0
-				if values0, err, ok0 = next0(); err != nil {
-					yield(nil, err)
+				if values0, err, ok0 = next0(); err != nil && !yield(nil, err) {
 					return
 				}
 			}
 
 			if i1 == len(values1) {
 				i1 = 0
-				if values1, err, ok1 = next1(); err != nil {
-					yield(nil, err)
+				if values1, err, ok1 = next1(); err != nil && !yield(nil, err) {
 					return
 				}
 			}
@@ -283,15 +279,13 @@ func merge2[T any](cmp func(T, T) int, seq0, seq1 iter.Seq2[[]T, error]) iter.Se
 		}
 
 		for ok0 && yield(values0, nil) {
-			if values0, err, ok0 = next0(); err != nil {
-				yield(nil, err)
+			if values0, err, ok0 = next0(); err != nil && !yield(nil, err) {
 				return
 			}
 		}
 
 		for ok1 && yield(values1, nil) {
-			if values1, err, ok1 = next1(); err != nil {
-				yield(nil, err)
+			if values1, err, ok1 = next1(); err != nil && !yield(nil, err) {
 				return
 			}
 		}
@@ -300,24 +294,16 @@ func merge2[T any](cmp func(T, T) int, seq0, seq1 iter.Seq2[[]T, error]) iter.Se
 
 func merge[T any](cmp func(T, T) int, seqs []iter.Seq2[[]T, error]) iter.Seq2[[]T, error] {
 	return func(yield func([]T, error) bool) {
-		tree, err := buildTree(seqs...)
-		if err != nil {
-			yield(nil, err)
-			return
-		}
+		tree := makeTree(seqs...)
 		defer tree.stop()
 
 		buffer := make([]T, bufferSize)
 		for {
 			n, err := tree.next(buffer, cmp)
-			if err != nil {
-				yield(nil, err)
+			if err == nil && n == 0 {
 				return
 			}
-			if n == 0 {
-				return
-			}
-			if !yield(buffer[:n], nil) {
+			if !yield(buffer[:n], err) {
 				return
 			}
 		}

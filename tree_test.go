@@ -81,7 +81,7 @@ func TestTree(t *testing.T) {
 				seqs[i] = words(seq...)
 			}
 
-			var tree, _ = buildTree(seqs...)
+			var tree = makeTree(seqs...)
 			var values []string
 			var buffer [1]string
 			for {
