@@ -38,8 +38,9 @@ const (
 //	for v, err := range kway.Merge(seq0, seq1, seq2) {
 //		if err != nil {
 //			...
+//		} else {
+//			...
 //		}
-//		...
 //	}
 //
 // The algorithm is implemented for sequences of pairs that produce either a

@@ -52,12 +52,35 @@ ordered sequence of values.
 The following code snippets illustrates how to merge three ordered sequences
 into one:
 ```go
-for value := range kway.Merge(seq0, seq1, seq2) {
+for v, err := range kway.Merge(seq0, seq1, seq2) {
   ...
 }
 ```
 
 More examples are available in the [Go doc][godoc].
+
+### Error Handling
+
+The merge functions report errors seen from the input sequences, but the
+presence of errors does not interrupt the merge operations. When an error
+occurs, it is immediately bubbled up to the program, but if more values are
+available in the input sequences, the program can continue consuming them after
+handling the error. This model delegates the decision of how to handle errors to
+the application, allowing it to carry or abort depending on the error value or
+type, for example:
+
+```go
+for v, err := range kway.Merge(sequences...) {
+    if err != nil {
+        // handle the error, the program may choose to break out of the loop
+        // or carry on to read the next value.
+        ...
+    } else {
+        // a value is available, process it
+        ...
+    }
+}
+```
 
 ## Implementation
 
