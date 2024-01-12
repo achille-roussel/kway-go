@@ -53,7 +53,7 @@ The following code snippets illustrates how to merge three ordered sequences
 into one:
 ```go
 for v, err := range kway.Merge(seq0, seq1, seq2) {
-  ...
+    ...
 }
 ```
 
