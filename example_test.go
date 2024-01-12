@@ -3,6 +3,7 @@ package kway_test
 import (
 	"fmt"
 	"iter"
+	"testing"
 
 	"github.com/achille-roussel/kway-go"
 )
@@ -63,4 +64,45 @@ func ExampleMergeSlice() {
 
 	// Output:
 	// 0,1,1,1,2,2,2,2,3,3,3,3,4,4,4,5,
+}
+
+func ExampleMerge_Channels(t *testing.T) {
+	sequence := func(min, max, step int) iter.Seq2[int, error] {
+		values, done := make(chan int), make(chan struct{})
+		go func() {
+			defer close(values)
+
+			for i := min; i < max; i += step {
+				select {
+				case values <- i:
+				case <-done:
+				}
+			}
+		}()
+
+		return func(yield func(int, error) bool) {
+			for value := range values {
+				if !yield(value, nil) {
+					close(done)
+					for range values {
+					} // wait for the goroutine to finish
+					break
+				}
+			}
+		}
+	}
+
+	for value, err := range kway.Merge(
+		sequence(0, 5, 1), // 0,1,2,3,4
+		sequence(1, 5, 2), // 1,3
+		sequence(2, 5, 3), // 2
+	) {
+		if err != nil {
+			panic(err)
+		}
+		fmt.Printf("%v,", value)
+	}
+
+	// Output:
+	// 0,1,1,2,2,3,3,4,
 }
