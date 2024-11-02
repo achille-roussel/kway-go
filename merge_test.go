@@ -52,28 +52,67 @@ func TestMerge(t *testing.T) {
 	for n := range 10 {
 		t.Run(fmt.Sprint(n), func(t *testing.T) {
 			seqs := make([]iter.Seq2[int, error], n)
-			want := make([]int, 0, 2*n)
-
 			for i := range seqs {
 				seqs[i] = count(i)
-				v, err := values(count(i))
-				if err != nil {
-					t.Fatal(err)
-				}
-				want = append(want, v...)
 			}
 
-			slices.Sort(want)
-			seq := Merge(seqs...)
-
-			got, err := values(seq)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !slices.Equal(got, want) {
-				t.Errorf("expected %v, got %v", want, got)
-			}
+			assertCorrectMerge(t, seqs)
 		})
+	}
+}
+
+func TestMerge2(t *testing.T) {
+	it := func(s []int) iter.Seq2[int, error] {
+		return func(yield func(int, error) bool) {
+			for i := range s {
+				if !yield(s[i], nil) {
+					return
+				}
+			}
+		}
+	}
+	cases := []struct {
+		name string
+		s1   []int
+		s2   []int
+	}{
+		{
+			name: "interleaved slices",
+			s1:   []int{0, 3},
+			s2:   []int{2, 5},
+		},
+		{
+			name: "interleaved slices",
+			s1:   []int{2, 5},
+			s2:   []int{0, 3},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			seqs := []iter.Seq2[int, error]{it(c.s1), it(c.s2)}
+			assertCorrectMerge(t, seqs)
+		})
+	}
+}
+
+func assertCorrectMerge(t *testing.T, seqs []iter.Seq2[int, error]) {
+	want := make([]int, 0)
+	for _, seq := range seqs {
+		v, err := values(seq)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want = append(want, v...)
+	}
+	slices.Sort(want)
+
+	seq := Merge(seqs...)
+	got, err := values(seq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("expected %v, got %v", want, got)
 	}
 }
 
