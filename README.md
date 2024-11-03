@@ -1,5 +1,5 @@
 # kway-go [![Go Reference](https://pkg.go.dev/badge/github.com/achille-roussel/kway-go.svg)](https://pkg.go.dev/github.com/achille-roussel/kway-go)
-K-way merge with Go 1.22 range functions
+K-way merge with Go 1.23 range functions
 
 [bboreham]: https://github.com/bboreham
 [godoc]: https://pkg.go.dev/github.com/achille-roussel/kway-go@v0.2.0#pkg-examples
@@ -10,14 +10,6 @@ K-way merge with Go 1.22 range functions
 This package is intended to be used as a library and installed with:
 ```sh
 go get github.com/achille-roussel/kway-go
-```
-
-:warning: The package depends on Go 1.22 and enabling the rangefunc experiment.
-
-To enable the rangefunc experiment, set the GOEXPERIMENT environment variable in
-the shell that executes the go commands:
-```sh
-export GOEXPERIMENT=rangefunc
 ```
 
 ## Usage
