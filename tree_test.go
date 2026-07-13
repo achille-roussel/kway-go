@@ -85,14 +85,14 @@ func TestTree(t *testing.T) {
 			var values []string
 			var buffer [1]string
 			for {
-				n, err := tree.next(buffer[:], strings.Compare)
+				batch, err := tree.next(buffer[:], strings.Compare)
 				if err != nil {
 					t.Fatal(err)
 				}
-				if n == 0 {
+				if len(batch) == 0 {
 					break
 				}
-				values = append(values, buffer[0])
+				values = append(values, batch...)
 			}
 
 			var want []string
