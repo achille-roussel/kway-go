@@ -1,6 +1,7 @@
 package kway
 
 import (
+	"bytes"
 	"cmp"
 	"errors"
 	"fmt"
@@ -594,6 +595,99 @@ func TestMergeStopEarly(t *testing.T) {
 					t.Errorf("expected to stop after %d values, got %d", stop, n)
 				}
 			})
+		}
+	}
+}
+
+// recycledSource produces the values start, start+step, start+2*step, ... as
+// zero-padded numbers, in batches of at most batchSize elements of T = []byte
+// which all point into a single buffer that the source overwrites on every
+// pull. It emulates sources like parquet-go's row readers, which recycle the
+// memory holding the values they yielded once they are asked for more.
+func recycledSource(start, step, count, batchSize int) iter.Seq2[[][]byte, error] {
+	return func(yield func([][]byte, error) bool) {
+		buf := make([]byte, batchSize*valueWidth)
+		batch := make([][]byte, batchSize)
+
+		for i := 0; i < count; i += batchSize {
+			for j := range buf {
+				buf[j] = '#' // poison the values yielded by the previous pull
+			}
+			n := min(batchSize, count-i)
+			for j := range n {
+				value := buf[j*valueWidth : (j+1)*valueWidth]
+				copy(value, formatValue(start+(i+j)*step))
+				batch[j] = value
+			}
+			if !yield(batch[:n], nil) {
+				return
+			}
+		}
+	}
+}
+
+const valueWidth = 8
+
+func formatValue(i int) string {
+	return fmt.Sprintf("%0*d", valueWidth, i)
+}
+
+// TestMergeSliceRecycledBuffers verifies that the merge does not read values
+// from a batch after pulling the next one from the sequence that produced it:
+// the values are backed by memory that the sequences recycle across pulls, so
+// any value copied into the output buffer but not yielded yet before a refill
+// would be corrupted.
+func TestMergeSliceRecycledBuffers(t *testing.T) {
+	const count = 1000
+
+	// Small batches interleave the refills with the merge; batches larger than
+	// minBufferSize also exercise the paths passing the batches through to the
+	// caller without copying them.
+	for _, k := range []int{2, 3, 8} {
+		for _, batchSize := range []int{1, 5, 32, 128} {
+			for _, duplicate := range []bool{false, true} {
+				name := fmt.Sprintf("k=%d,batch=%d,duplicate=%t", k, batchSize, duplicate)
+
+				t.Run(name, func(t *testing.T) {
+					seqs := make([]iter.Seq2[[][]byte, error], k)
+					var want []string
+
+					if duplicate {
+						// All the sequences produce the same values.
+						for i := range seqs {
+							seqs[i] = recycledSource(0, 1, count, batchSize)
+						}
+						for i := range count {
+							for range k {
+								want = append(want, formatValue(i))
+							}
+						}
+					} else {
+						// Sequence i produces the values i, i+k, i+2k, ...
+						for i := range seqs {
+							n := (count - i + k - 1) / k
+							seqs[i] = recycledSource(i, k, n, batchSize)
+						}
+						for i := range count {
+							want = append(want, formatValue(i))
+						}
+					}
+
+					got := make([]string, 0, len(want))
+					for values, err := range MergeSliceFunc(bytes.Compare, seqs...) {
+						if err != nil {
+							t.Fatal(err)
+						}
+						for _, value := range values {
+							got = append(got, string(value))
+						}
+					}
+
+					if !slices.Equal(got, want) {
+						t.Errorf("expected %q, got %q", want, got)
+					}
+				})
+			}
 		}
 	}
 }

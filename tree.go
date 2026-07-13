@@ -19,11 +19,14 @@ type tree[T any] struct {
 	// while nextScalar replays the tree for each value, which is faster when
 	// values from the sequences are interleaved.
 	runMode bool
-	// pending is set after a batch of the winning cursor was passed through
-	// to the caller without being copied. The cursor must not be refilled
-	// until the caller is done with the batch, because refilling resumes the
-	// producer, which may reuse the memory holding the values; the refill is
-	// performed at the beginning of the next call to next.
+	// pending is set when the winning cursor ran out of values but must not be
+	// refilled yet, because refilling resumes the producer, which may reuse the
+	// memory holding the values of the batch it produced last. That happens
+	// when the batch was passed through to the caller without being copied, and
+	// when values copied from it are still sitting in the buffer being filled.
+	// In both cases the values are handed to the caller first, and the refill is
+	// performed at the beginning of the next call to next, by which time the
+	// caller is done with them.
 	pending bool
 }
 
@@ -214,6 +217,14 @@ func (t *tree[T]) nextScalar(buf []T, cmp func(T, T) int) (n int, err error) {
 				c.err = nil
 				break
 			}
+			if n > 0 {
+				// The buffer holds values copied from the batch that the cursor
+				// just ran out of, and refilling it may recycle the memory that
+				// backs them; they are handed to the caller first, and the
+				// refill is performed at the beginning of the next call to next.
+				t.pending = true
+				break
+			}
 			values, err, ok := nextNonEmptyValues(c.next)
 			if ok {
 				c.values, c.err = values, err
@@ -292,6 +303,14 @@ func (t *tree[T]) nextRuns(buf []T, cmp func(T, T) int) (n int, err error) {
 		if len(c.values) == 0 {
 			if err = c.err; err != nil {
 				c.err = nil
+				break
+			}
+			if n > 0 {
+				// The buffer holds values copied from the batch that the cursor
+				// just ran out of, and refilling it may recycle the memory that
+				// backs them; they are handed to the caller first, and the
+				// refill is performed at the beginning of the next call to next.
+				t.pending = true
 				break
 			}
 			values, err, ok := nextNonEmptyValues(c.next)

@@ -136,6 +136,13 @@ func MergeFunc[T any](cmp func(T, T) int, seqs ...iter.Seq2[T, error]) iter.Seq2
 //		values = append(values, vs...)
 //	}
 //
+// The same rule applies to the input sequences: they may reuse the slices they
+// yield, as well as the memory that the values point to, as soon as they are
+// asked for the next slice of values. The merge algorithm does not read the
+// values of a slice after pulling the next one from the sequence that produced
+// it, which makes it safe to merge sequences that recycle their buffers, such
+// as readers decoding values into pages that are reused across reads.
+//
 // Due to the increased complexity that derives from using MergeSlice,
 // applications should prefer using Merge, which uses the same algorithm as
 // MergeSlice internally, and can already achieve very decent throughput.
@@ -339,14 +346,33 @@ func merge2[T any](cmp func(T, T) int, seq0, seq1 iter.Seq2[[]T, error]) iter.Se
 				}
 			}
 
-			if i0 == len(values0) {
+			// Pulling the next batch from a sequence lets it recycle the memory
+			// holding the values of the batch it yielded before, which the
+			// buffer may hold copies of; the buffer is therefore flushed before
+			// refilling, so the values reach the caller while they are still
+			// valid. Only the refill triggers the flush, to keep the yielded
+			// batches as large as possible.
+			refill0 := i0 == len(values0)
+			refill1 := i1 == len(values1)
+
+			if offset > 0 && (refill0 || refill1) {
+				if !yield(buffer[:offset], nil) {
+					return
+				}
+				offset = 0
+				if len(buffer) < bufferSize {
+					buffer = make([]T, min(2*len(buffer), bufferSize))
+				}
+			}
+
+			if refill0 {
 				i0 = 0
 				if values0, err, ok0 = next0(); err != nil && !yield(nil, err) {
 					return
 				}
 			}
 
-			if i1 == len(values1) {
+			if refill1 {
 				i1 = 0
 				if values1, err, ok1 = next1(); err != nil && !yield(nil, err) {
 					return
