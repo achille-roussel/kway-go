@@ -3,7 +3,6 @@ package kway_test
 import (
 	"fmt"
 	"iter"
-	"testing"
 
 	"github.com/achille-roussel/kway-go"
 )
@@ -66,7 +65,7 @@ func ExampleMergeSlice() {
 	// 0,1,1,1,2,2,2,2,3,3,3,3,4,4,4,5,
 }
 
-func ExampleMerge_Channels(t *testing.T) {
+func ExampleMerge_channels() {
 	sequence := func(min, max, step int) iter.Seq2[int, error] {
 		values, done := make(chan int), make(chan struct{})
 		go func() {

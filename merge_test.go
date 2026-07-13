@@ -372,3 +372,49 @@ func benchmarkSlice[V cmp.Ordered](b *testing.B, merge func(int, func(V, V) int)
 	b.ReportMetric(float64(b.N)/duration.Seconds(), "merge/s")
 	b.ReportMetric(float64(comparisons)/float64(b.N), "comp/op")
 }
+
+func intSeq(values []int) iter.Seq2[int, error] {
+	return func(yield func(int, error) bool) {
+		for _, v := range values {
+			if !yield(v, nil) {
+				return
+			}
+		}
+	}
+}
+
+// TestMergeStopEarly stops consuming the merged sequence at various points,
+// in particular during the passthrough phase after other sequences have been
+// exhausted, which must not call yield again after it returned false.
+func TestMergeStopEarly(t *testing.T) {
+	for _, k := range []int{2, 3} {
+		for _, stop := range []int{1, 10, 100, 500} {
+			t.Run(fmt.Sprintf("k=%d,stop=%d", k, stop), func(t *testing.T) {
+				seqs := make([]iter.Seq2[int, error], k)
+				for i := range seqs {
+					n := 3
+					if i == k-1 {
+						n = 1000
+					}
+					vs := make([]int, n)
+					for j := range vs {
+						vs[j] = i + j*k
+					}
+					seqs[i] = intSeq(vs)
+				}
+				n := 0
+				for _, err := range Merge(seqs...) {
+					if err != nil {
+						t.Fatal(err)
+					}
+					if n++; n == stop {
+						break
+					}
+				}
+				if n != stop {
+					t.Errorf("expected to stop after %d values, got %d", stop, n)
+				}
+			})
+		}
+	}
+}

@@ -280,13 +280,19 @@ func merge2[T any](cmp func(T, T) int, seq0, seq1 iter.Seq2[[]T, error]) iter.Se
 		values0 = values0[i0:]
 		values1 = values1[i1:]
 
-		for ok0 && yield(values0, nil) {
+		for ok0 {
+			if len(values0) > 0 && !yield(values0, nil) {
+				return
+			}
 			if values0, err, ok0 = next0(); err != nil && !yield(nil, err) {
 				return
 			}
 		}
 
-		for ok1 && yield(values1, nil) {
+		for ok1 {
+			if len(values1) > 0 && !yield(values1, nil) {
+				return
+			}
 			if values1, err, ok1 = next1(); err != nil && !yield(nil, err) {
 				return
 			}
