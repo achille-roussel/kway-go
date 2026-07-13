@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"iter"
+	"math/rand/v2"
 	"slices"
 	"testing"
 	"time"
@@ -383,6 +384,184 @@ func intSeq(values []int) iter.Seq2[int, error] {
 	}
 }
 
+func sliceSeq(batches [][]int) iter.Seq2[[]int, error] {
+	return func(yield func([]int, error) bool) {
+		for _, b := range batches {
+			if !yield(b, nil) {
+				return
+			}
+		}
+	}
+}
+
+// TestMergeBlocks exercises run-structured inputs: each sequence produces
+// interleaved blocks of consecutive values, triggering the bulk-copy and
+// zero-copy passthrough paths of the merge algorithms.
+func TestMergeBlocks(t *testing.T) {
+	for _, k := range []int{2, 3, 5, 8} {
+		for _, size := range []int{1, 3, 32, 200} {
+			t.Run(fmt.Sprintf("k=%d,size=%d", k, size), func(t *testing.T) {
+				const numBlocks = 5
+				data := make([][]int, k)
+				var want []int
+				for i := range data {
+					for b := 0; b < numBlocks; b++ {
+						base := (b*k + i) * size
+						for j := 0; j < size; j++ {
+							data[i] = append(data[i], base+j)
+						}
+					}
+					want = append(want, data[i]...)
+				}
+				slices.Sort(want)
+
+				seqs := make([]iter.Seq2[int, error], k)
+				for i := range seqs {
+					seqs[i] = intSeq(data[i])
+				}
+				got, err := values(Merge(seqs...))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !slices.Equal(got, want) {
+					t.Errorf("Merge: expected %v, got %v", want, got)
+				}
+
+				sseqs := make([]iter.Seq2[[]int, error], k)
+				for i := range sseqs {
+					var batches [][]int
+					for v := data[i]; len(v) > 0; {
+						n := min(size, len(v))
+						batches = append(batches, v[:n])
+						v = v[n:]
+					}
+					sseqs[i] = sliceSeq(batches)
+				}
+				got, err = concatValues(MergeSlice(sseqs...))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !slices.Equal(got, want) {
+					t.Errorf("MergeSlice: expected %v, got %v", want, got)
+				}
+			})
+		}
+	}
+}
+
+// TestMergeRandom validates the merge algorithms against a sort-based
+// reference on randomized inputs: random sequence counts, lengths, value
+// distributions, and batch partitions (including empty batches).
+func TestMergeRandom(t *testing.T) {
+	prng := rand.New(rand.NewPCG(0, 1))
+
+	for trial := 0; trial < 200; trial++ {
+		k := 1 + prng.IntN(9)
+		limit := []int{10, 100, 100000}[trial%3]
+		data := make([][]int, k)
+		var want []int
+		for i := range data {
+			vs := make([]int, prng.IntN(500))
+			for j := range vs {
+				vs[j] = prng.IntN(limit)
+			}
+			slices.Sort(vs)
+			data[i] = vs
+			want = append(want, vs...)
+		}
+		slices.Sort(want)
+
+		seqs := make([]iter.Seq2[int, error], k)
+		for i := range seqs {
+			seqs[i] = intSeq(data[i])
+		}
+		got, err := values(Merge(seqs...))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Equal(got, want) {
+			t.Fatalf("trial %d: Merge of %d sequences produced wrong values", trial, k)
+		}
+
+		sseqs := make([]iter.Seq2[[]int, error], k)
+		for i := range sseqs {
+			var batches [][]int
+			for v := data[i]; len(v) > 0; {
+				if prng.IntN(10) == 0 {
+					batches = append(batches, nil)
+				}
+				n := min(1+prng.IntN(200), len(v))
+				batches = append(batches, v[:n])
+				v = v[n:]
+			}
+			sseqs[i] = sliceSeq(batches)
+		}
+		got, err = concatValues(MergeSlice(sseqs...))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Equal(got, want) {
+			t.Fatalf("trial %d: MergeSlice of %d sequences produced wrong values", trial, k)
+		}
+	}
+}
+
+// TestMergeErrorBetweenRuns injects an error in the middle of a sequence of
+// run-structured inputs, exercising error handling in the bulk-copy and
+// zero-copy passthrough paths.
+func TestMergeErrorBetweenRuns(t *testing.T) {
+	errval := errors.New("test")
+
+	for _, k := range []int{2, 3, 5} {
+		t.Run(fmt.Sprint(k), func(t *testing.T) {
+			const runLen = 500
+			seqs := make([]iter.Seq2[int, error], k)
+			var want []int
+			for i := range seqs {
+				vs := make([]int, runLen)
+				for j := range vs {
+					vs[j] = i*runLen + j
+				}
+				want = append(want, vs...)
+				if i == 1 {
+					seqs[i] = func(yield func(int, error) bool) {
+						for j, v := range vs {
+							if j == runLen/2 && !yield(0, errval) {
+								return
+							}
+							if !yield(v, nil) {
+								return
+							}
+						}
+					}
+				} else {
+					seqs[i] = intSeq(vs)
+				}
+			}
+			slices.Sort(want)
+
+			var got []int
+			errCount := 0
+			for v, err := range Merge(seqs...) {
+				if err != nil {
+					if err != errval {
+						t.Fatal(err)
+					}
+					errCount++
+				} else {
+					got = append(got, v)
+				}
+			}
+			if errCount != 1 {
+				t.Errorf("expected 1 error, got %d", errCount)
+			}
+			if !slices.Equal(got, want) {
+				t.Errorf("expected %d values in order, got %d", len(want), len(got))
+			}
+		})
+	}
+}
+
 // TestMergeStopEarly stops consuming the merged sequence at various points,
 // in particular during the passthrough phase after other sequences have been
 // exhausted, which must not call yield again after it returned false.
@@ -417,4 +596,92 @@ func TestMergeStopEarly(t *testing.T) {
 			})
 		}
 	}
+}
+
+//go:noinline
+func blocks(i, k, size int) iter.Seq2[int, error] {
+	return func(yield func(int, error) bool) {
+		for b := 0; ; b++ {
+			base := (b*k + i) * size
+			for j := 0; j < size; j++ {
+				if !yield(base+j, nil) {
+					return
+				}
+			}
+		}
+	}
+}
+
+//go:noinline
+func blocksSlice(i, k, size int) iter.Seq2[[]int, error] {
+	return func(yield func([]int, error) bool) {
+		values := make([]int, size)
+		for b := 0; ; b++ {
+			base := (b*k + i) * size
+			for j := range values {
+				values[j] = base + j
+			}
+			if !yield(values, nil) {
+				return
+			}
+		}
+	}
+}
+
+func BenchmarkMergeBlocks2(b *testing.B) {
+	benchmark(b, func(n int, cmp func(int, int) int) iter.Seq2[int, error] {
+		return MergeFunc(cmp,
+			blocks(0, 2, 32),
+			blocks(1, 2, 32),
+		)
+	})
+}
+
+func BenchmarkMergeBlocks3(b *testing.B) {
+	benchmark(b, func(n int, cmp func(int, int) int) iter.Seq2[int, error] {
+		return MergeFunc(cmp,
+			blocks(0, 3, 32),
+			blocks(1, 3, 32),
+			blocks(2, 3, 32),
+		)
+	})
+}
+
+func BenchmarkMergeBlocks8(b *testing.B) {
+	benchmark(b, func(n int, cmp func(int, int) int) iter.Seq2[int, error] {
+		seqs := make([]iter.Seq2[int, error], 8)
+		for i := range seqs {
+			seqs[i] = blocks(i, 8, 32)
+		}
+		return MergeFunc(cmp, seqs...)
+	})
+}
+
+func BenchmarkMergeInterleaved8(b *testing.B) {
+	benchmark(b, func(n int, cmp func(int, int) int) iter.Seq2[int, error] {
+		seqs := make([]iter.Seq2[int, error], 8)
+		for i := range seqs {
+			seqs[i] = sequence(i, 1<<62, 8)
+		}
+		return MergeFunc(cmp, seqs...)
+	})
+}
+
+func BenchmarkMergeSliceBlocks2(b *testing.B) {
+	benchmarkSlice(b, func(n int, cmp func(int, int) int) iter.Seq2[[]int, error] {
+		return MergeSliceFunc(cmp,
+			blocksSlice(0, 2, 128),
+			blocksSlice(1, 2, 128),
+		)
+	})
+}
+
+func BenchmarkMergeSliceBlocks3(b *testing.B) {
+	benchmarkSlice(b, func(n int, cmp func(int, int) int) iter.Seq2[[]int, error] {
+		return MergeSliceFunc(cmp,
+			blocksSlice(0, 3, 128),
+			blocksSlice(1, 3, 128),
+			blocksSlice(2, 3, 128),
+		)
+	})
 }

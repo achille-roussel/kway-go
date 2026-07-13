@@ -7,21 +7,19 @@ import (
 )
 
 const (
-	// bufferSize is the size of the buffer used to read values from the
-	// sequences.
+	// bufferSize is the maximum size of the buffers used to read values from
+	// the sequences.
 	//
-	// Note: I would like to avoid making this configurable, but I am also
-	// aware that in latency-sensitive applications, it might be preferable
-	// to have a smaller buffer size (or none at all), so values are produced
-	// as soon as they are available. I would like to delay this change until
-	// there is production data available to prove that it is needed, in my
-	// experience, k-way merges tend to be used in batch processing systems
-	// where throughput matters more than latency. One approach I would like
-	// to experiment with is exponentially growing the buffer size (up to a
-	// limit), so the merge algorithm can start with a small buffer size which
-	// allows the first few values to be produces immediately, and then grow
-	// to optimize for high throughput use cases.
+	// Buffers start at minBufferSize and grow exponentially up to this limit:
+	// the first values are produced with low latency and merges of small
+	// sequences do not pay for full-size buffers, while large merges retain
+	// the throughput benefits of large buffers, which amortize baseline costs
+	// such as the coroutine context switches in the Go runtime.
 	bufferSize = 128
+
+	// minBufferSize is the initial size of the buffers used to read values
+	// from the sequences.
+	minBufferSize = 8
 )
 
 // Merge merges multiple sequences into one. The sequences must produce ordered
@@ -164,8 +162,8 @@ func MergeSliceFunc[T any](cmp func(T, T) int, seqs ...iter.Seq2[[]T, error]) it
 }
 
 func buffer[T any](bufferSize int, seq iter.Seq2[T, error]) iter.Seq2[[]T, error] {
-	buf := make([]T, bufferSize)
 	return func(yield func([]T, error) bool) {
+		buf := make([]T, min(minBufferSize, bufferSize))
 		n := 0
 
 		var err error
@@ -179,6 +177,9 @@ func buffer[T any](bufferSize int, seq iter.Seq2[T, error]) iter.Seq2[[]T, error
 					return
 				}
 				n = 0
+				if len(buf) < bufferSize {
+					buf = make([]T, min(2*len(buf), bufferSize))
+				}
 			}
 		}
 
@@ -223,10 +224,11 @@ func merge2[T any](cmp func(T, T) int, seq0, seq1 iter.Seq2[[]T, error]) iter.Se
 			return
 		}
 
-		buffer := make([]T, bufferSize)
+		buffer := make([]T, minBufferSize)
 		offset := 0
 		i0 := 0
 		i1 := 0
+		prev := 0
 		for ok0 && ok1 {
 			for i0 < len(values0) && i1 < len(values1) {
 				v0 := values0[i0]
@@ -237,24 +239,103 @@ func merge2[T any](cmp func(T, T) int, seq0, seq1 iter.Seq2[[]T, error]) iter.Se
 						return
 					}
 					offset = 0
+					if len(buffer) < bufferSize {
+						buffer = make([]T, min(2*len(buffer), bufferSize))
+					}
 				}
 
 				diff := cmp(v0, v1)
 				switch {
 				case diff < 0:
-					buffer[offset] = v0
-					offset++
-					i0++
+					if prev < 0 && i0+1 < len(values0) && cmp(values0[i0+1], v1) < 0 {
+						// The first sequence won at least three times in a
+						// row: gallop to find the run of values that sort
+						// before the head of the second sequence, and emit
+						// them in bulk.
+						end := i0 + 1 + runLength(values0[i0+1:], v1, cmp)
+
+						if i0 == 0 && end == len(values0) && end >= minBufferSize {
+							// The entire batch sorts before the head of the
+							// other sequence: pass it through without
+							// copying. Small batches are aggregated into the
+							// buffer instead, so they do not degrade into
+							// small yields.
+							if offset > 0 {
+								if !yield(buffer[:offset], nil) {
+									return
+								}
+								offset = 0
+							}
+							if !yield(values0, nil) {
+								return
+							}
+							i0 = end
+						} else {
+							for i0 < end {
+								if offset == len(buffer) {
+									if !yield(buffer[:offset], nil) {
+										return
+									}
+									offset = 0
+									if len(buffer) < bufferSize {
+										buffer = make([]T, min(2*len(buffer), bufferSize))
+									}
+								}
+								n := copy(buffer[offset:], values0[i0:end])
+								offset += n
+								i0 += n
+							}
+						}
+					} else {
+						buffer[offset] = v0
+						offset++
+						i0++
+					}
+					prev = -1
 				case diff > 0:
-					buffer[offset] = v1
-					offset++
-					i1++
+					if prev > 0 && i1+1 < len(values1) && cmp(values1[i1+1], v0) < 0 {
+						end := i1 + 1 + runLength(values1[i1+1:], v0, cmp)
+
+						if i1 == 0 && end == len(values1) && end >= minBufferSize {
+							if offset > 0 {
+								if !yield(buffer[:offset], nil) {
+									return
+								}
+								offset = 0
+							}
+							if !yield(values1, nil) {
+								return
+							}
+							i1 = end
+						} else {
+							for i1 < end {
+								if offset == len(buffer) {
+									if !yield(buffer[:offset], nil) {
+										return
+									}
+									offset = 0
+									if len(buffer) < bufferSize {
+										buffer = make([]T, min(2*len(buffer), bufferSize))
+									}
+								}
+								n := copy(buffer[offset:], values1[i1:end])
+								offset += n
+								i1 += n
+							}
+						}
+					} else {
+						buffer[offset] = v1
+						offset++
+						i1++
+					}
+					prev = +1
 				default:
 					buffer[offset+0] = v0
 					buffer[offset+1] = v1
 					offset += 2
 					i0++
 					i1++
+					prev = 0
 				}
 			}
 
@@ -300,19 +381,46 @@ func merge2[T any](cmp func(T, T) int, seq0, seq1 iter.Seq2[[]T, error]) iter.Se
 	}
 }
 
+// runLength returns the number of leading values that sort strictly before
+// bound. The first value is known to sort before bound, so the search
+// gallops from the second value: exponential probing followed by a binary
+// search, costing O(log n) comparisons for a run of n values.
+func runLength[T any](values []T, bound T, cmp func(T, T) int) int {
+	lo, hi := 0, 1
+	for hi < len(values) && cmp(values[hi], bound) < 0 {
+		lo = hi
+		hi *= 2
+	}
+	if hi > len(values) {
+		hi = len(values)
+	}
+	for lo+1 < hi {
+		mid := int(uint(lo+hi) >> 1)
+		if cmp(values[mid], bound) < 0 {
+			lo = mid
+		} else {
+			hi = mid
+		}
+	}
+	return hi
+}
+
 func merge[T any](cmp func(T, T) int, seqs []iter.Seq2[[]T, error]) iter.Seq2[[]T, error] {
 	return func(yield func([]T, error) bool) {
 		tree := makeTree(seqs...)
 		defer tree.stop()
 
-		buffer := make([]T, bufferSize)
+		buffer := make([]T, minBufferSize)
 		for {
-			n, err := tree.next(buffer, cmp)
-			if err == nil && n == 0 {
+			values, err := tree.next(buffer, cmp)
+			if err == nil && len(values) == 0 {
 				return
 			}
-			if !yield(buffer[:n], err) {
+			if !yield(values, err) {
 				return
+			}
+			if len(buffer) < bufferSize {
+				buffer = make([]T, min(2*len(buffer), bufferSize))
 			}
 		}
 	}
