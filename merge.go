@@ -445,7 +445,9 @@ func merge[T any](cmp func(T, T) int, seqs []iter.Seq2[[]T, error]) iter.Seq2[[]
 			if !yield(values, err) {
 				return
 			}
-			if len(buffer) < bufferSize {
+			// A batch starting at buffer[0] was aggregated; zero-copy batches
+			// come directly from the input sequences.
+			if len(buffer) < bufferSize && len(values) > 0 && &values[0] == &buffer[0] {
 				buffer = make([]T, min(2*len(buffer), bufferSize))
 			}
 		}
