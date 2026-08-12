@@ -722,6 +722,38 @@ func blocksSlice(i, k, size int) iter.Seq2[[]int, error] {
 	}
 }
 
+//go:noinline
+func finiteBlocksSlice(start, size, n int) iter.Seq2[[]int, error] {
+	return func(yield func([]int, error) bool) {
+		values := make([]int, size)
+		for b := range n {
+			base := start + b*size
+			for j := range values {
+				values[j] = base + j
+			}
+			if !yield(values, nil) {
+				return
+			}
+		}
+	}
+}
+
+//go:noinline
+func interleavedSlice(i, k, size, n int) iter.Seq2[[]int, error] {
+	return func(yield func([]int, error) bool) {
+		values := make([]int, size)
+		for b := range n {
+			base := b * k * size
+			for j := range values {
+				values[j] = base + i + j*k
+			}
+			if !yield(values, nil) {
+				return
+			}
+		}
+	}
+}
+
 func BenchmarkMergeBlocks2(b *testing.B) {
 	benchmark(b, func(n int, cmp func(int, int) int) iter.Seq2[int, error] {
 		return MergeFunc(cmp,
@@ -778,4 +810,57 @@ func BenchmarkMergeSliceBlocks3(b *testing.B) {
 			blocksSlice(2, 3, 128),
 		)
 	})
+}
+
+// BenchmarkMergeSliceZeroCopyBatches exercises five consecutive zero-copy
+// output batches from three sources. After the first aggregated batch, the
+// next five batches from the first source sort before its challenger.
+func BenchmarkMergeSliceZeroCopyBatches(b *testing.B) {
+	seqs := []iter.Seq2[[]int, error]{
+		finiteBlocksSlice(0, minBufferSize, 6),
+		finiteBlocksSlice(1<<20, minBufferSize, 1),
+		finiteBlocksSlice(2<<20, minBufferSize, 1),
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		values := 0
+		batches := 0
+		for batch, err := range MergeSliceFunc(cmp.Compare[int], seqs...) {
+			if err != nil {
+				b.Fatal(err)
+			}
+			values += len(batch)
+			if batches++; batches == 6 {
+				break
+			}
+		}
+		if values != 6*minBufferSize || batches != 6 {
+			b.Fatalf("expected six batches containing %d values, got %d batches containing %d values", 6*minBufferSize, batches, values)
+		}
+	}
+}
+
+func BenchmarkMergeSliceInterleaved3(b *testing.B) {
+	const batches = 8
+
+	seqs := []iter.Seq2[[]int, error]{
+		interleavedSlice(0, 3, bufferSize, batches),
+		interleavedSlice(1, 3, bufferSize, batches),
+		interleavedSlice(2, 3, bufferSize, batches),
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		values := 0
+		for batch, err := range MergeSliceFunc(cmp.Compare[int], seqs...) {
+			if err != nil {
+				b.Fatal(err)
+			}
+			values += len(batch)
+		}
+		if values != len(seqs)*batches*bufferSize {
+			b.Fatalf("expected %d values, got %d", len(seqs)*batches*bufferSize, values)
+		}
+	}
 }
