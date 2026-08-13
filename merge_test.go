@@ -761,6 +761,87 @@ func BenchmarkMergeInterleaved8(b *testing.B) {
 	})
 }
 
+// BenchmarkMergeFirstValue8 measures the time from creating long input
+// sequences to receiving the first merged value.
+func BenchmarkMergeFirstValue8(b *testing.B) {
+	const fanIn = 8
+
+	for range b.N {
+		seqs := make([]iter.Seq2[int, error], fanIn)
+		for i := range seqs {
+			seqs[i] = sequence(i, 1<<62, fanIn)
+		}
+
+		got := 0
+		ok := false
+		for value, err := range MergeFunc(cmp.Compare[int], seqs...) {
+			if err != nil {
+				b.Fatal(err)
+			}
+			got = value
+			ok = true
+			break
+		}
+		if !ok || got != 0 {
+			b.Fatalf("expected first value 0, got %d", got)
+		}
+	}
+}
+
+// BenchmarkMergeBufferLong8 measures throughput after each input buffer has
+// grown to its maximum size.
+func BenchmarkMergeBufferLong8(b *testing.B) {
+	const (
+		fanIn  = 8
+		length = 8 * bufferSize
+	)
+
+	b.ReportAllocs()
+	for range b.N {
+		seqs := make([]iter.Seq2[int, error], fanIn)
+		for i := range seqs {
+			seqs[i] = sequence(i, fanIn*length+i, fanIn)
+		}
+
+		got := 0
+		for _, err := range MergeFunc(cmp.Compare[int], seqs...) {
+			if err != nil {
+				b.Fatal(err)
+			}
+			got++
+		}
+		if got != fanIn*length {
+			b.Fatalf("expected %d values, got %d", fanIn*length, got)
+		}
+	}
+}
+
+func BenchmarkMergeBufferBoundaries8(b *testing.B) {
+	const fanIn = 8
+	lengths := [...]int{0, minBufferSize, 3 * minBufferSize, 7 * minBufferSize, 15 * minBufferSize}
+
+	b.ReportAllocs()
+	for range b.N {
+		for _, n := range lengths {
+			seqs := make([]iter.Seq2[int, error], fanIn)
+			for i := range seqs {
+				seqs[i] = sequence(i, fanIn*n+i, fanIn)
+			}
+
+			got := 0
+			for _, err := range MergeFunc(cmp.Compare[int], seqs...) {
+				if err != nil {
+					b.Fatal(err)
+				}
+				got++
+			}
+			if got != fanIn*n {
+				b.Fatalf("expected %d values, got %d", fanIn*n, got)
+			}
+		}
+	}
+}
+
 func BenchmarkMergeSliceBlocks2(b *testing.B) {
 	benchmarkSlice(b, func(n int, cmp func(int, int) int) iter.Seq2[[]int, error] {
 		return MergeSliceFunc(cmp,
