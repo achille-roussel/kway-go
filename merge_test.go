@@ -118,6 +118,34 @@ func assertCorrectMerge(t *testing.T, seqs []iter.Seq2[int, error]) {
 	}
 }
 
+// TestMergeBufferBoundaries covers empty inputs and each point where an
+// input buffer would otherwise grow after yielding a full batch.
+func TestMergeBufferBoundaries(t *testing.T) {
+	const fanIn = 8
+	lengths := [...]int{0, minBufferSize, 3 * minBufferSize, 7 * minBufferSize, 15 * minBufferSize}
+
+	for _, n := range lengths {
+		t.Run(fmt.Sprintf("n=%d", n), func(t *testing.T) {
+			seqs := make([]iter.Seq2[int, error], fanIn)
+			for i := range seqs {
+				seqs[i] = sequence(i, fanIn*n+i, fanIn)
+			}
+
+			got, err := values(MergeFunc(cmp.Compare[int], seqs...))
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := make([]int, fanIn*n)
+			for i := range want {
+				want[i] = i
+			}
+			if !slices.Equal(got, want) {
+				t.Errorf("expected %v, got %v", want, got)
+			}
+		})
+	}
+}
+
 func TestMergeContinueAfterError2(t *testing.T) {
 	errval := errors.New("")
 
@@ -791,6 +819,87 @@ func BenchmarkMergeInterleaved8(b *testing.B) {
 		}
 		return MergeFunc(cmp, seqs...)
 	})
+}
+
+// BenchmarkMergeFirstValue8 measures the time from creating long input
+// sequences to receiving the first merged value.
+func BenchmarkMergeFirstValue8(b *testing.B) {
+	const fanIn = 8
+
+	for range b.N {
+		seqs := make([]iter.Seq2[int, error], fanIn)
+		for i := range seqs {
+			seqs[i] = sequence(i, 1<<62, fanIn)
+		}
+
+		got := 0
+		ok := false
+		for value, err := range MergeFunc(cmp.Compare[int], seqs...) {
+			if err != nil {
+				b.Fatal(err)
+			}
+			got = value
+			ok = true
+			break
+		}
+		if !ok || got != 0 {
+			b.Fatalf("expected first value 0, got %d", got)
+		}
+	}
+}
+
+// BenchmarkMergeBufferLong8 measures throughput after each input buffer has
+// grown to its maximum size.
+func BenchmarkMergeBufferLong8(b *testing.B) {
+	const (
+		fanIn  = 8
+		length = 8 * bufferSize
+	)
+
+	b.ReportAllocs()
+	for range b.N {
+		seqs := make([]iter.Seq2[int, error], fanIn)
+		for i := range seqs {
+			seqs[i] = sequence(i, fanIn*length+i, fanIn)
+		}
+
+		got := 0
+		for _, err := range MergeFunc(cmp.Compare[int], seqs...) {
+			if err != nil {
+				b.Fatal(err)
+			}
+			got++
+		}
+		if got != fanIn*length {
+			b.Fatalf("expected %d values, got %d", fanIn*length, got)
+		}
+	}
+}
+
+func BenchmarkMergeBufferBoundaries8(b *testing.B) {
+	const fanIn = 8
+	lengths := [...]int{0, minBufferSize, 3 * minBufferSize, 7 * minBufferSize, 15 * minBufferSize}
+
+	b.ReportAllocs()
+	for range b.N {
+		for _, n := range lengths {
+			seqs := make([]iter.Seq2[int, error], fanIn)
+			for i := range seqs {
+				seqs[i] = sequence(i, fanIn*n+i, fanIn)
+			}
+
+			got := 0
+			for _, err := range MergeFunc(cmp.Compare[int], seqs...) {
+				if err != nil {
+					b.Fatal(err)
+				}
+				got++
+			}
+			if got != fanIn*n {
+				b.Fatalf("expected %d values, got %d", fanIn*n, got)
+			}
+		}
+	}
 }
 
 func BenchmarkMergeSliceBlocks2(b *testing.B) {
