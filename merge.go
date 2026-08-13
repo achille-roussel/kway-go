@@ -170,23 +170,30 @@ func MergeSliceFunc[T any](cmp func(T, T) int, seqs ...iter.Seq2[[]T, error]) it
 
 func buffer[T any](bufferSize int, seq iter.Seq2[T, error]) iter.Seq2[[]T, error] {
 	return func(yield func([]T, error) bool) {
-		buf := make([]T, min(minBufferSize, bufferSize))
+		var buf []T
 		n := 0
 
-		var err error
-		for buf[n], err = range seq {
+		for value, err := range seq {
 			if err != nil {
 				if !yield(nil, err) {
 					return
 				}
-			} else if n++; n == len(buf) {
+				continue
+			}
+
+			if n == 0 && len(buf) < bufferSize {
+				if len(buf) == 0 {
+					buf = make([]T, min(minBufferSize, bufferSize))
+				} else {
+					buf = make([]T, min(2*len(buf), bufferSize))
+				}
+			}
+			buf[n] = value
+			if n++; n == len(buf) {
 				if !yield(buf, nil) {
 					return
 				}
 				n = 0
-				if len(buf) < bufferSize {
-					buf = make([]T, min(2*len(buf), bufferSize))
-				}
 			}
 		}
 

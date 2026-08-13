@@ -118,6 +118,34 @@ func assertCorrectMerge(t *testing.T, seqs []iter.Seq2[int, error]) {
 	}
 }
 
+// TestMergeBufferBoundaries covers empty inputs and each point where an
+// input buffer would otherwise grow after yielding a full batch.
+func TestMergeBufferBoundaries(t *testing.T) {
+	const fanIn = 8
+	lengths := [...]int{0, minBufferSize, 3 * minBufferSize, 7 * minBufferSize, 15 * minBufferSize}
+
+	for _, n := range lengths {
+		t.Run(fmt.Sprintf("n=%d", n), func(t *testing.T) {
+			seqs := make([]iter.Seq2[int, error], fanIn)
+			for i := range seqs {
+				seqs[i] = sequence(i, fanIn*n+i, fanIn)
+			}
+
+			got, err := values(MergeFunc(cmp.Compare[int], seqs...))
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := make([]int, fanIn*n)
+			for i := range want {
+				want[i] = i
+			}
+			if !slices.Equal(got, want) {
+				t.Errorf("expected %v, got %v", want, got)
+			}
+		})
+	}
+}
+
 func TestMergeContinueAfterError2(t *testing.T) {
 	errval := errors.New("")
 
