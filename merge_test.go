@@ -446,6 +446,19 @@ func formatValues(values []int) [][]byte {
 	return formatted
 }
 
+type taggedValue struct {
+	key    int
+	source int
+}
+
+func taggedValues(source int, keys ...int) []taggedValue {
+	values := make([]taggedValue, len(keys))
+	for i, key := range keys {
+		values[i] = taggedValue{key: key, source: source}
+	}
+	return values
+}
+
 // TestMergeBlocks exercises run-structured inputs: each sequence produces
 // interleaved blocks of consecutive values, triggering the bulk-copy and
 // zero-copy passthrough paths of the merge algorithms.
@@ -498,6 +511,155 @@ func TestMergeBlocks(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// TestMergeSliceAlternatingRunComparisons checks both winner directions, the
+// non-galloping path, failed lookaheads, and gallop boundaries. Its comparison
+// counts match a simple two-way merge whenever a cacheable boundary exists.
+func TestMergeSliceAlternatingRunComparisons(t *testing.T) {
+	const runCount = 1000
+
+	for _, test := range []struct {
+		runLength       int
+		wantComparisons int
+	}{
+		{runLength: 1, wantComparisons: 1999},
+		{runLength: 2, wantComparisons: 3998},
+		{runLength: 4, wantComparisons: 7996},
+		{runLength: 8, wantComparisons: 15991},
+		{runLength: 16, wantComparisons: 19990},
+		{runLength: 32, wantComparisons: 23988},
+		{runLength: 64, wantComparisons: 27986},
+	} {
+		for _, reversed := range []bool{false, true} {
+			t.Run(fmt.Sprintf("run=%d/reversed=%t", test.runLength, reversed), func(t *testing.T) {
+				values0, values1 := alternatingRuns(runCount, test.runLength)
+				if reversed {
+					values0, values1 = values1, values0
+				}
+				comparisons := 0
+				compare := func(a, b int) int {
+					comparisons++
+					return cmp.Compare(a, b)
+				}
+
+				got, err := concatValues(MergeSliceFunc(compare,
+					sliceSeq([][]int{values0}),
+					sliceSeq([][]int{values1}),
+				))
+				if err != nil {
+					t.Fatal(err)
+				}
+				want := make([]int, len(values0)+len(values1))
+				for i := range want {
+					want[i] = i
+				}
+				if !slices.Equal(got, want) {
+					t.Fatal("merged values are not ordered")
+				}
+				if comparisons != test.wantComparisons {
+					t.Fatalf("expected %d comparisons, got %d", test.wantComparisons, comparisons)
+				}
+			})
+		}
+	}
+}
+
+// TestMergeSliceCachedComparisons checks that cached equality results retain
+// the merge's first-input tie order, and that a cache does not cross batches.
+func TestMergeSliceCachedComparisons(t *testing.T) {
+	tests := []struct {
+		name             string
+		values0, values1 [][]taggedValue
+		want             []taggedValue
+		comparisons      int
+	}{
+		{
+			name:    "first lookahead tie",
+			values0: [][]taggedValue{taggedValues(0, 0, 1, 2, 4)},
+			values1: [][]taggedValue{taggedValues(1, 2, 3, 5)},
+			want: []taggedValue{
+				{key: 0, source: 0}, {key: 1, source: 0},
+				{key: 2, source: 0}, {key: 2, source: 1},
+				{key: 3, source: 1}, {key: 4, source: 0}, {key: 5, source: 1},
+			},
+			comparisons: 5,
+		},
+		{
+			name:    "second lookahead tie",
+			values0: [][]taggedValue{taggedValues(0, 2, 3, 5)},
+			values1: [][]taggedValue{taggedValues(1, 0, 1, 2, 4)},
+			want: []taggedValue{
+				{key: 0, source: 1}, {key: 1, source: 1},
+				{key: 2, source: 0}, {key: 2, source: 1},
+				{key: 3, source: 0}, {key: 4, source: 1}, {key: 5, source: 0},
+			},
+			comparisons: 5,
+		},
+		{
+			name:    "first gallop tie",
+			values0: [][]taggedValue{taggedValues(0, 0, 1, 2, 3, 4)},
+			values1: [][]taggedValue{taggedValues(1, 3, 5)},
+			want: []taggedValue{
+				{key: 0, source: 0}, {key: 1, source: 0}, {key: 2, source: 0},
+				{key: 3, source: 0}, {key: 3, source: 1},
+				{key: 4, source: 0}, {key: 5, source: 1},
+			},
+			comparisons: 5,
+		},
+		{
+			name:    "second gallop tie",
+			values0: [][]taggedValue{taggedValues(0, 3, 5)},
+			values1: [][]taggedValue{taggedValues(1, 0, 1, 2, 3, 4)},
+			want: []taggedValue{
+				{key: 0, source: 1}, {key: 1, source: 1}, {key: 2, source: 1},
+				{key: 3, source: 0}, {key: 3, source: 1},
+				{key: 4, source: 1}, {key: 5, source: 0},
+			},
+			comparisons: 5,
+		},
+		{
+			name: "batch boundary",
+			values0: [][]taggedValue{
+				taggedValues(0, 0, 1),
+				taggedValues(0, 2, 4),
+			},
+			values1: [][]taggedValue{
+				taggedValues(1, 2, 3),
+				taggedValues(1, 5),
+			},
+			want: []taggedValue{
+				{key: 0, source: 0}, {key: 1, source: 0},
+				{key: 2, source: 0}, {key: 2, source: 1},
+				{key: 3, source: 1}, {key: 4, source: 0}, {key: 5, source: 1},
+			},
+			comparisons: 5,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			comparisons := 0
+			compare := func(a, b taggedValue) int {
+				comparisons++
+				return cmp.Compare(a.key, b.key)
+			}
+
+			got, err := concatValues(MergeSliceFunc(compare,
+				sliceSeq(test.values0),
+				sliceSeq(test.values1),
+			))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(got, test.want) {
+				t.Errorf("expected %v, got %v", test.want, got)
+			}
+			if comparisons != test.comparisons {
+				t.Errorf("expected %d comparisons, got %d", test.comparisons, comparisons)
+			}
+		})
 	}
 }
 
@@ -998,8 +1160,9 @@ func BenchmarkMergeSliceInterleaved3(b *testing.B) {
 }
 
 // BenchmarkMergeSliceAlternatingRuns measures the end-to-end latency of
-// merging two one-batch inputs whose runs alternate around the gallop
-// crossover. The inputs use fixed-width byte keys and bytes.Compare.
+// merging two one-batch inputs whose runs alternate from the non-galloping
+// path through the gallop crossover. The inputs use fixed-width byte keys and
+// bytes.Compare.
 func BenchmarkMergeSliceAlternatingRuns(b *testing.B) {
 	benchmarkMergeSliceAlternatingRuns(b, false)
 }
@@ -1013,7 +1176,7 @@ func BenchmarkMergeSliceComparatorCalls(b *testing.B) {
 func benchmarkMergeSliceAlternatingRuns(b *testing.B, countComparisons bool) {
 	const runCount = 1000
 
-	for _, runLength := range []int{2, 4, 8, 16, 32, 64} {
+	for _, runLength := range []int{1, 2, 4, 8, 16, 32, 64} {
 		b.Run(fmt.Sprintf("run=%d", runLength), func(b *testing.B) {
 			values0, values1 := alternatingRuns(runCount, runLength)
 			seq0 := sliceSeq([][][]byte{formatValues(values0)})

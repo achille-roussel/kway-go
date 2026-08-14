@@ -259,98 +259,25 @@ func merge2[T any](cmp func(T, T) int, seq0, seq1 iter.Seq2[[]T, error]) iter.Se
 				}
 
 				diff := cmp(v0, v1)
-				switch {
-				case diff < 0:
-					if prev < 0 && i0+1 < len(values0) && cmp(values0[i0+1], v1) < 0 {
-						// The first sequence won at least three times in a
-						// row: gallop to find the run of values that sort
-						// before the head of the second sequence, and emit
-						// them in bulk.
-						end := i0 + 1 + runLength(values0[i0+1:], v1, cmp)
-
-						if i0 == 0 && end == len(values0) && end >= minBufferSize {
-							// The entire batch sorts before the head of the
-							// other sequence: pass it through without
-							// copying. Small batches are aggregated into the
-							// buffer instead, so they do not degrade into
-							// small yields.
-							if offset > 0 {
-								if !yield(buffer[:offset], nil) {
-									return
-								}
-								offset = 0
-							}
-							if !yield(values0, nil) {
-								return
-							}
-							i0 = end
-						} else {
-							for i0 < end {
-								if offset == len(buffer) {
-									if !yield(buffer[:offset], nil) {
-										return
-									}
-									offset = 0
-									if len(buffer) < bufferSize {
-										buffer = make([]T, min(2*len(buffer), bufferSize))
-									}
-								}
-								n := copy(buffer[offset:], values0[i0:end])
-								offset += n
-								i0 += n
-							}
-						}
-					} else {
-						buffer[offset] = v0
-						offset++
-						i0++
-					}
+				if diff != 0 {
 					prev = -1
-				case diff > 0:
-					if prev > 0 && i1+1 < len(values1) && cmp(values1[i1+1], v0) < 0 {
-						end := i1 + 1 + runLength(values1[i1+1:], v0, cmp)
-
-						if i1 == 0 && end == len(values1) && end >= minBufferSize {
-							if offset > 0 {
-								if !yield(buffer[:offset], nil) {
-									return
-								}
-								offset = 0
-							}
-							if !yield(values1, nil) {
-								return
-							}
-							i1 = end
-						} else {
-							for i1 < end {
-								if offset == len(buffer) {
-									if !yield(buffer[:offset], nil) {
-										return
-									}
-									offset = 0
-									if len(buffer) < bufferSize {
-										buffer = make([]T, min(2*len(buffer), bufferSize))
-									}
-								}
-								n := copy(buffer[offset:], values1[i1:end])
-								offset += n
-								i1 += n
-							}
-						}
+					if diff < 0 {
+						buffer[offset] = v0
+						i0++
 					} else {
 						buffer[offset] = v1
-						offset++
 						i1++
+						prev = +1
 					}
-					prev = +1
-				default:
-					buffer[offset+0] = v0
-					buffer[offset+1] = v1
-					offset += 2
-					i0++
-					i1++
-					prev = 0
+					offset++
+					goto unequal
 				}
+
+				buffer[offset+0] = v0
+				buffer[offset+1] = v1
+				offset += 2
+				i0++
+				i1++
 			}
 
 			// Pulling the next batch from a sequence lets it recycle the memory
@@ -411,16 +338,309 @@ func merge2[T any](cmp func(T, T) int, seq0, seq1 iter.Seq2[[]T, error]) iter.Se
 				return
 			}
 		}
+		return
+
+	unequal:
+		// Keep equal heads and alternating winners on compact paths. The cached
+		// path starts after a repeated winner supplies its first comparison.
+		var firstDiff int
+		first := false
+		for i0 < len(values0) && i1 < len(values1) {
+			v0 := values0[i0]
+			v1 := values1[i1]
+
+			if (offset + 1) >= len(buffer) {
+				if !yield(buffer[:offset], nil) {
+					return
+				}
+				offset = 0
+				if len(buffer) < bufferSize {
+					buffer = make([]T, min(2*len(buffer), bufferSize))
+				}
+			}
+
+			diff := cmp(v0, v1)
+			switch {
+			case diff < 0:
+				if prev < 0 {
+					firstDiff = diff
+					first = true
+					goto cachedLoop
+				}
+				buffer[offset] = v0
+				offset++
+				i0++
+				prev = -1
+			case diff > 0:
+				if prev > 0 {
+					firstDiff = diff
+					first = true
+					goto cachedLoop
+				}
+				buffer[offset] = v1
+				offset++
+				i1++
+				prev = +1
+			default:
+				buffer[offset+0] = v0
+				buffer[offset+1] = v1
+				offset += 2
+				i0++
+				i1++
+				prev = 0
+			}
+		}
+	cachedLoop:
+
+		for ok0 && ok1 {
+			for i0 < len(values0) && i1 < len(values1) {
+				v0 := values0[i0]
+				v1 := values1[i1]
+
+				if (offset + 1) >= len(buffer) {
+					if !yield(buffer[:offset], nil) {
+						return
+					}
+					offset = 0
+					if len(buffer) < bufferSize {
+						buffer = make([]T, min(2*len(buffer), bufferSize))
+					}
+				}
+
+				var diff int
+				if first {
+					diff = firstDiff
+					first = false
+				} else {
+					diff = cmp(v0, v1)
+				}
+			compare:
+				switch {
+				case diff < 0:
+					if prev < 0 && i0+1 < len(values0) {
+						nextDiff := cmp(values0[i0+1], v1)
+						if nextDiff < 0 {
+							// The first sequence won at least three times in a
+							// row: gallop to find the run of values that sort
+							// before the head of the second sequence, and emit
+							// them in bulk.
+							n, boundaryDiff := runLength(values0[i0+1:], v1, cmp)
+							end := i0 + 1 + n
+
+							if i0 == 0 && end == len(values0) && end >= minBufferSize {
+								// The entire batch sorts before the head of the
+								// other sequence: pass it through without
+								// copying. Small batches are aggregated into the
+								// buffer instead, so they do not degrade into
+								// small yields.
+								if offset > 0 {
+									if !yield(buffer[:offset], nil) {
+										return
+									}
+									offset = 0
+								}
+								if !yield(values0, nil) {
+									return
+								}
+								i0 = end
+							} else {
+								for i0 < end {
+									if offset == len(buffer) {
+										if !yield(buffer[:offset], nil) {
+											return
+										}
+										offset = 0
+										if len(buffer) < bufferSize {
+											buffer = make([]T, min(2*len(buffer), bufferSize))
+										}
+									}
+									n := copy(buffer[offset:], values0[i0:end])
+									offset += n
+									i0 += n
+								}
+							}
+							if end < len(values0) {
+								diff = boundaryDiff
+								v0 = values0[i0]
+								prev = -1
+								goto cached
+							}
+							prev = -1
+							continue
+						} else {
+							buffer[offset] = v0
+							offset++
+							i0++
+							diff = nextDiff
+							v0 = values0[i0]
+							prev = -1
+							goto cached
+						}
+					}
+					buffer[offset] = v0
+					offset++
+					i0++
+					prev = -1
+				case diff > 0:
+					if prev > 0 && i1+1 < len(values1) {
+						// This lookahead compares values1 with v0, the reverse
+						// of the comparison stored in diff.
+						nextDiff := cmp(values1[i1+1], v0)
+						if nextDiff < 0 {
+							n, boundaryDiff := runLength(values1[i1+1:], v0, cmp)
+							end := i1 + 1 + n
+
+							if i1 == 0 && end == len(values1) && end >= minBufferSize {
+								if offset > 0 {
+									if !yield(buffer[:offset], nil) {
+										return
+									}
+									offset = 0
+								}
+								if !yield(values1, nil) {
+									return
+								}
+								i1 = end
+							} else {
+								for i1 < end {
+									if offset == len(buffer) {
+										if !yield(buffer[:offset], nil) {
+											return
+										}
+										offset = 0
+										if len(buffer) < bufferSize {
+											buffer = make([]T, min(2*len(buffer), bufferSize))
+										}
+									}
+									n := copy(buffer[offset:], values1[i1:end])
+									offset += n
+									i1 += n
+								}
+							}
+							if end < len(values1) {
+								diff = -boundaryDiff
+								v1 = values1[i1]
+								prev = +1
+								goto cached
+							}
+							prev = +1
+							continue
+						} else {
+							buffer[offset] = v1
+							offset++
+							i1++
+							diff = -nextDiff
+							v1 = values1[i1]
+							prev = +1
+							goto cached
+						}
+					}
+					buffer[offset] = v1
+					offset++
+					i1++
+					prev = +1
+				default:
+					buffer[offset+0] = v0
+					buffer[offset+1] = v1
+					offset += 2
+					i0++
+					i1++
+					prev = 0
+				}
+				continue
+
+			cached:
+				// The cached comparison's heads remain in the current batches,
+				// so use it after making room for the next output.
+				if (offset + 1) >= len(buffer) {
+					if !yield(buffer[:offset], nil) {
+						return
+					}
+					offset = 0
+					if len(buffer) < bufferSize {
+						buffer = make([]T, min(2*len(buffer), bufferSize))
+					}
+				}
+				goto compare
+			}
+
+			// Pulling the next batch from a sequence lets it recycle the memory
+			// holding the values of the batch it yielded before, which the
+			// buffer may hold copies of; the buffer is therefore flushed before
+			// refilling, so the values reach the caller while they are still
+			// valid. Only the refill triggers the flush, to keep the yielded
+			// batches as large as possible.
+			refill0 := i0 == len(values0)
+			refill1 := i1 == len(values1)
+
+			if offset > 0 && (refill0 || refill1) {
+				if !yield(buffer[:offset], nil) {
+					return
+				}
+				offset = 0
+				if len(buffer) < bufferSize {
+					buffer = make([]T, min(2*len(buffer), bufferSize))
+				}
+			}
+
+			if refill0 {
+				i0 = 0
+				if values0, err, ok0 = next0(); err != nil && !yield(nil, err) {
+					return
+				}
+			}
+
+			if refill1 {
+				i1 = 0
+				if values1, err, ok1 = next1(); err != nil && !yield(nil, err) {
+					return
+				}
+			}
+		}
+
+		if offset > 0 && !yield(buffer[:offset], nil) {
+			return
+		}
+
+		values0 = values0[i0:]
+		values1 = values1[i1:]
+
+		for ok0 {
+			if len(values0) > 0 && !yield(values0, nil) {
+				return
+			}
+			if values0, err, ok0 = next0(); err != nil && !yield(nil, err) {
+				return
+			}
+		}
+
+		for ok1 {
+			if len(values1) > 0 && !yield(values1, nil) {
+				return
+			}
+			if values1, err, ok1 = next1(); err != nil && !yield(nil, err) {
+				return
+			}
+		}
+
 	}
 }
 
 // runLength returns the number of leading values that sort strictly before
-// bound. The first value is known to sort before bound, so the search
-// gallops from the second value: exponential probing followed by a binary
-// search, costing O(log n) comparisons for a run of n values.
-func runLength[T any](values []T, bound T, cmp func(T, T) int) int {
+// bound and the comparison result for the first remaining value. The latter
+// is valid only when the returned length is less than len(values). The first
+// value is known to sort before bound, so the search gallops from the second
+// value: exponential probing followed by a binary search, costing O(log n)
+// comparisons for a run of n values.
+func runLength[T any](values []T, bound T, cmp func(T, T) int) (int, int) {
 	lo, hi := 0, 1
-	for hi < len(values) && cmp(values[hi], bound) < 0 {
+	boundaryDiff := 0
+	for hi < len(values) {
+		diff := cmp(values[hi], bound)
+		if diff >= 0 {
+			boundaryDiff = diff
+			break
+		}
 		lo = hi
 		hi *= 2
 	}
@@ -429,13 +649,15 @@ func runLength[T any](values []T, bound T, cmp func(T, T) int) int {
 	}
 	for lo+1 < hi {
 		mid := int(uint(lo+hi) >> 1)
-		if cmp(values[mid], bound) < 0 {
+		diff := cmp(values[mid], bound)
+		if diff < 0 {
 			lo = mid
 		} else {
 			hi = mid
+			boundaryDiff = diff
 		}
 	}
-	return hi
+	return hi, boundaryDiff
 }
 
 func merge[T any](cmp func(T, T) int, seqs []iter.Seq2[[]T, error]) iter.Seq2[[]T, error] {
