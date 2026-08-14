@@ -413,14 +413,37 @@ func intSeq(values []int) iter.Seq2[int, error] {
 	}
 }
 
-func sliceSeq(batches [][]int) iter.Seq2[[]int, error] {
-	return func(yield func([]int, error) bool) {
+func sliceSeq[T any](batches [][]T) iter.Seq2[[]T, error] {
+	return func(yield func([]T, error) bool) {
 		for _, b := range batches {
 			if !yield(b, nil) {
 				return
 			}
 		}
 	}
+}
+
+func alternatingRuns(runCount, runLength int) (values0, values1 []int) {
+	values0 = make([]int, 0, runCount*runLength)
+	values1 = make([]int, 0, runCount*runLength)
+	for run := 0; run < 2*runCount; run++ {
+		for value := run * runLength; value < (run+1)*runLength; value++ {
+			if run%2 == 0 {
+				values0 = append(values0, value)
+			} else {
+				values1 = append(values1, value)
+			}
+		}
+	}
+	return values0, values1
+}
+
+func formatValues(values []int) [][]byte {
+	formatted := make([][]byte, len(values))
+	for i, value := range values {
+		formatted[i] = []byte(formatValue(value))
+	}
+	return formatted
 }
 
 // TestMergeBlocks exercises run-structured inputs: each sequence produces
@@ -971,5 +994,68 @@ func BenchmarkMergeSliceInterleaved3(b *testing.B) {
 		if values != len(seqs)*batches*bufferSize {
 			b.Fatalf("expected %d values, got %d", len(seqs)*batches*bufferSize, values)
 		}
+	}
+}
+
+// BenchmarkMergeSliceAlternatingRuns measures the end-to-end latency of
+// merging two one-batch inputs whose runs alternate around the gallop
+// crossover. The inputs use fixed-width byte keys and bytes.Compare.
+func BenchmarkMergeSliceAlternatingRuns(b *testing.B) {
+	benchmarkMergeSliceAlternatingRuns(b, false)
+}
+
+// BenchmarkMergeSliceComparatorCalls reports comparator calls separately, so
+// incrementing the counter does not affect the latency benchmark.
+func BenchmarkMergeSliceComparatorCalls(b *testing.B) {
+	benchmarkMergeSliceAlternatingRuns(b, true)
+}
+
+func benchmarkMergeSliceAlternatingRuns(b *testing.B, countComparisons bool) {
+	const runCount = 1000
+
+	for _, runLength := range []int{2, 4, 8, 16, 32, 64} {
+		b.Run(fmt.Sprintf("run=%d", runLength), func(b *testing.B) {
+			values0, values1 := alternatingRuns(runCount, runLength)
+			seq0 := sliceSeq([][][]byte{formatValues(values0)})
+			seq1 := sliceSeq([][][]byte{formatValues(values1)})
+			valueCount := len(values0) + len(values1)
+
+			got, err := concatValues(MergeSliceFunc(bytes.Compare, seq0, seq1))
+			if err != nil {
+				b.Fatal(err)
+			}
+			if len(got) != valueCount || !slices.IsSortedFunc(got, bytes.Compare) {
+				b.Fatalf("expected %d ordered values, got %d", valueCount, len(got))
+			}
+
+			comparisons := 0
+			compare := bytes.Compare
+			if countComparisons {
+				compare = func(a, b []byte) int {
+					comparisons++
+					return bytes.Compare(a, b)
+				}
+			}
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			values := 0
+			for i := 0; i < b.N; i++ {
+				for batch, err := range MergeSliceFunc(compare, seq0, seq1) {
+					if err != nil {
+						b.Fatal(err)
+					}
+					values += len(batch)
+				}
+			}
+			b.StopTimer()
+
+			if values != b.N*valueCount {
+				b.Fatalf("expected %d values, got %d", b.N*valueCount, values)
+			}
+			if countComparisons {
+				b.ReportMetric(float64(comparisons)/float64(b.N), "comp/op")
+			}
+		})
 	}
 }
