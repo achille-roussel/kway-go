@@ -810,6 +810,69 @@ func TestMergeStopEarly(t *testing.T) {
 			})
 		}
 	}
+
+	for _, reversed := range []bool{false, true} {
+		t.Run(fmt.Sprintf("ties/reversed=%t", reversed), func(t *testing.T) {
+			inputs := [2][]taggedValue{taggedValues(0, 0, 1), nil}
+			for source := range inputs {
+				for range 2 * bufferSize {
+					inputs[source] = append(inputs[source], taggedValue{key: 2, source: source})
+				}
+			}
+			if reversed {
+				inputs[0], inputs[1] = inputs[1], inputs[0]
+			}
+			compare := func(a, b taggedValue) int { return cmp.Compare(a.key, b.key) }
+
+			// A leading run enters the cached path before the equal heads.
+			// The reference emits both equal heads, with input 0 first.
+			var want []taggedValue
+			v0, v1 := inputs[0], inputs[1]
+			for len(v0) > 0 && len(v1) > 0 {
+				switch compare(v0[0], v1[0]) {
+				case -1:
+					want = append(want, v0[0])
+					v0 = v0[1:]
+				case +1:
+					want = append(want, v1[0])
+					v1 = v1[1:]
+				default:
+					want = append(want, v0[0], v1[0])
+					v0, v1 = v0[1:], v1[1:]
+				}
+			}
+			want = append(want, v0...)
+			want = append(want, v1...)
+
+			// Stop a fresh merge at every yield, including the tie-loop flushes
+			// as the buffer grows and after it reaches its maximum size.
+			for stop := 1; ; stop++ {
+				var got []taggedValue
+				yields := 0
+				for batch, err := range MergeSliceFunc(compare,
+					sliceSeq([][]taggedValue{inputs[0]}),
+					sliceSeq([][]taggedValue{inputs[1]}),
+				) {
+					if err != nil {
+						t.Fatal(err)
+					}
+					got = append(got, batch...)
+					if yields++; yields == stop {
+						break
+					}
+				}
+				if len(got) > len(want) || !slices.Equal(got, want[:len(got)]) {
+					t.Fatalf("stop=%d: merged values differ from reference prefix", stop)
+				}
+				if yields < stop {
+					if len(got) != len(want) {
+						t.Fatalf("expected %d values, got %d", len(want), len(got))
+					}
+					break
+				}
+			}
+		})
+	}
 }
 
 // recycledSource produces the values start, start+step, start+2*step, ... as

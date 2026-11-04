@@ -541,7 +541,7 @@ func merge2[T any](cmp func(T, T) int, seq0, seq1 iter.Seq2[[]T, error]) iter.Se
 					prev = +1
 				default:
 					prev = 0
-					// Keep consecutive ties off the run-detection path.
+					// Skip the outer loop, first flag, and switch between equal pairs.
 					for {
 						buffer[offset+0] = v0
 						buffer[offset+1] = v1
