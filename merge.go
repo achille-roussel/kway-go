@@ -540,12 +540,33 @@ func merge2[T any](cmp func(T, T) int, seq0, seq1 iter.Seq2[[]T, error]) iter.Se
 					i1++
 					prev = +1
 				default:
-					buffer[offset+0] = v0
-					buffer[offset+1] = v1
-					offset += 2
-					i0++
-					i1++
 					prev = 0
+					// Keep consecutive ties off the run-detection path.
+					for {
+						buffer[offset+0] = v0
+						buffer[offset+1] = v1
+						offset += 2
+						i0++
+						i1++
+						if i0 == len(values0) || i1 == len(values1) {
+							break
+						}
+						v0 = values0[i0]
+						v1 = values1[i1]
+						if (offset + 1) >= len(buffer) {
+							if !yield(buffer[:offset], nil) {
+								return
+							}
+							offset = 0
+							if len(buffer) < bufferSize {
+								buffer = make([]T, min(2*len(buffer), bufferSize))
+							}
+						}
+						diff = cmp(v0, v1)
+						if diff != 0 {
+							goto compare
+						}
+					}
 				}
 				continue
 
