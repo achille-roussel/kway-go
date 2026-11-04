@@ -1222,3 +1222,57 @@ func benchmarkMergeSliceAlternatingRuns(b *testing.B, countComparisons bool) {
 		})
 	}
 }
+
+// BenchmarkMergeSliceDuplicates merges finite, sorted integer inputs in batches
+// of 128. The key range controls the number of equal heads, from all-equal
+// inputs through the mixed run/tie pattern to mostly distinct keys.
+func BenchmarkMergeSliceDuplicates(b *testing.B) {
+	const length = 8192
+
+	for _, keyRange := range []int{1, 4, 16, 64, 256, 1024, 8192} {
+		b.Run(fmt.Sprintf("range=%d", keyRange), func(b *testing.B) {
+			prng := rand.New(rand.NewPCG(0, 1))
+			seqs := make([]iter.Seq2[[]int, error], 2)
+			var want []int
+			for i := range seqs {
+				values := make([]int, length)
+				for j := range values {
+					values[j] = prng.IntN(keyRange)
+				}
+				slices.Sort(values)
+				want = append(want, values...)
+				var batches [][]int
+				for len(values) > 0 {
+					n := min(128, len(values))
+					batches = append(batches, values[:n])
+					values = values[n:]
+				}
+				seqs[i] = sliceSeq(batches)
+			}
+			slices.Sort(want)
+			got, err := concatValues(MergeSliceFunc(cmp.Compare[int], seqs...))
+			if err != nil {
+				b.Fatal(err)
+			}
+			if !slices.Equal(got, want) {
+				b.Fatal("merged values differ from sorted inputs")
+			}
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			values := 0
+			for i := 0; i < b.N; i++ {
+				for batch, err := range MergeSliceFunc(cmp.Compare[int], seqs...) {
+					if err != nil {
+						b.Fatal(err)
+					}
+					values += len(batch)
+				}
+			}
+			b.StopTimer()
+			if values != b.N*len(want) {
+				b.Fatalf("expected %d values, got %d", b.N*len(want), values)
+			}
+		})
+	}
+}
